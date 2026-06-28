@@ -18,5 +18,6 @@ def test_grafana_webhook_accepts_real_notification_test_payload() -> None:
         "status": "accepted",
         "source": "grafana",
         "alerts_received": 1,
+        "alerts_normalized": 1,
         "group_key": "webhook-57c6d9296de2ad39-1782063307",
     }

@@ -10,5 +10,18 @@ services:
     volumes:
       - grafana-data:/var/lib/grafana
 
+  postgres:
+    image: postgres:17
+    container_name: vigilia-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: vigilia
+      POSTGRES_PASSWORD: vigilia
+      POSTGRES_DB: vigilia
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
 volumes:
   grafana-data:
+  postgres-data:
