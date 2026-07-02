@@ -1,13 +1,23 @@
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import Column
+from sqlalchemy import Column, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, SQLModel
 
 
 class Alert(SQLModel, table=True):
     __tablename__ = "alerts" # type: ignore
+    __table_args__ = (
+        UniqueConstraint(
+            "source",
+            "fingerprint",
+            "starts_at",
+            "status",
+            name="uq_alert_source_fingerprint_starts_at_status",
+        ),
+    )
+
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
 

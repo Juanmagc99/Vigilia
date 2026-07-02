@@ -1,25 +1,32 @@
 from fastapi import APIRouter
 
 from app.db.session import DatabaseSession
-from app.repositories.alert_repository import save_alerts
+from app.events.publisher import AlertEventPublisherDependency
 from app.schemas.grafana import GrafanaWebhookPayload
-from app.services.grafana_normalizer import normalize_grafana_payload
+from app.services.alert_ingestion_service import ingest_grafana_payload
 
 
 router = APIRouter(prefix="/webhooks/grafana", tags=["grafana"])
 
+
 @router.post("")
 def receive_grafana_webhook(
-    payload: GrafanaWebhookPayload, session: DatabaseSession
+    payload: GrafanaWebhookPayload,
+    session: DatabaseSession,
+    publisher: AlertEventPublisherDependency,
 ) -> dict[str, object]:
-    norm_alerts = normalize_grafana_payload(payload)
-    saved_alerts = save_alerts(session, norm_alerts)
+    result = ingest_grafana_payload(
+        payload=payload,
+        session=session,
+        publisher=publisher,
+    )
 
     return {
         "status": "accepted",
         "source": "grafana",
-        "alerts_received": len(payload.alerts),
-        "alerts_normalized": len(norm_alerts),
-        "alerts_persisted": len(saved_alerts),
+        "alerts_received": result.alerts_received,
+        "alerts_normalized": result.alerts_normalized,
+        "alerts_persisted": result.alerts_persisted,
+        "events_published": result.events_published,
         "group_key": payload.groupKey,
     }

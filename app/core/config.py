@@ -12,6 +12,9 @@ class Settings(BaseSettings):
     db_user: str = "vigilia"
     db_password: str = "vigilia"
 
+    kafka_bootstrap_servers: str = "localhost:9092"
+    alerts_received_topic: str = "alerts.received"
+
     @computed_field
     @property
     def database_url(self) -> str:

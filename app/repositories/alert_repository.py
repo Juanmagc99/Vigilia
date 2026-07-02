@@ -50,10 +50,6 @@ def save_alerts(
         return alerts
     except SQLAlchemyError as exc:
         session.rollback()
-        logger.exception(
-            "Database operation failed operation=save_alerts entity=alert count=%s",
-            len(alerts),
-        )
         raise DatabaseAppError(
             message="Could not save alerts",
             metadata={

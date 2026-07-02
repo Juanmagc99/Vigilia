@@ -16,11 +16,13 @@ def register_exception_handlers(app: FastAPI) -> None:
 
 
 async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
-    logger.warning(
-        "Application error type=%s code=%s path=%s",
+    logger.exception(
+        "Application error type=%s code=%s path=%s metadata=%s",
         exc.error_type,
         exc.code,
         request.url.path,
+        exc.metadata,
+        exc_info=exc,
         extra={
             "error_type": exc.error_type,
             "error_code": exc.code,
