@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     kafka_bootstrap_servers: str = "localhost:9092"
     alerts_received_topic: str = "alerts.received"
 
+    incident_correlation_window_minutes: int = 45
+
     @computed_field
     @property
     def database_url(self) -> str:

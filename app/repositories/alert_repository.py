@@ -1,3 +1,5 @@
+from uuid import UUID
+
 from sqlalchemy.exc import SQLAlchemyError
 from sqlmodel import Session
 
@@ -58,3 +60,7 @@ def save_alerts(
                 "count": len(alerts),
             },
         ) from exc
+
+
+def get_alert_by_id(session: Session, alert_id: UUID) -> Alert | None:
+    return session.get(Alert, alert_id)

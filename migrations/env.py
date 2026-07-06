@@ -10,6 +10,8 @@ from sqlmodel import SQLModel
 
 from app.core.config import settings
 from app.db.models.alert import Alert
+from app.db.models.incident import Incident
+from app.db.models.incident_alert import IncidentAlert
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
