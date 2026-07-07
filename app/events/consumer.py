@@ -74,7 +74,7 @@ def run_alert_received_consumer() -> None:
                 continue
 
             try:
-                raw_value = kafka_message.value().decode("utf-8")
+                raw_value = kafka_message.value().decode("utf-8") # type: ignore
                 message = AlertReceivedMessage.model_validate_json(raw_value)
                 handle_alert_received(message)
             except ValidationError as exc:
