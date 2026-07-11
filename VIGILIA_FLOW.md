@@ -1,111 +1,134 @@
-# Vigilia: flujo actual y plan de incidentes
+# Vigilia: Current Flow And Incident Plan
 
-## Vision del proyecto
+## Project Vision
 
-Vigilia es un backend construido con FastAPI que recibe alertas desde Grafana Alerting, las normaliza, las persiste en PostgreSQL y publica eventos en Redpanda/Kafka para que otros procesos puedan reaccionar a ellas.
+Vigilia is a FastAPI backend that receives alerts from Grafana Alerting, normalizes them, stores them in PostgreSQL, and publishes events to Redpanda/Kafka so background workers can react to them.
 
-La idea no es sustituir a Grafana. Grafana sigue siendo quien detecta condiciones de alerta y dispara webhooks. Vigilia anade una capa propia encima para responder preguntas como:
+The goal is not to replace Grafana. Grafana remains responsible for detecting alert conditions and sending webhooks. Vigilia adds an operational layer on top of Grafana so we can answer questions such as:
 
-- que alerta llego
-- como se normalizo
-- como se persistio
-- que evento se genero
-- como se agrupan alertas relacionadas en incidentes
-- como se generaran reportes mas adelante
+- which alert arrived
+- how it was normalized
+- how it was persisted
+- which event was emitted
+- how related alerts are grouped into incidents
+- how incident reports will be generated later
 
-El objetivo funcional es que Vigilia construya una historia operativa alrededor de las alertas: primero eventos atomicos, luego incidentes, luego reportes.
+The product direction is:
 
-## Flujo actual de alertas
+```text
+Alert = atomic event received from Grafana
+Incident = group of related alerts
+Report = future summary/enrichment of an incident
+```
 
-El flujo ya construido es:
+The current sprint is focused on closing the `alerts -> incidents` loop before adding AI, reports, or more advanced workflows.
+
+## Current Alert Flow
+
+The alert ingestion flow is implemented:
 
 ```text
 Grafana Alerting
-  -> webhook HTTP
+  -> HTTP webhook
   -> FastAPI
   -> GrafanaWebhookPayload
   -> NormalizedAlert
-  -> Alert en PostgreSQL
+  -> Alert in PostgreSQL
   -> AlertReceivedMessage
   -> Redpanda/Kafka topic alerts.received
-  -> consumer de eventos
+  -> event consumer
+  -> incident correlation service
+  -> Incident in PostgreSQL
 ```
 
-En terminos de carpetas:
+Important files:
 
 ```text
 app/schemas/grafana.py
-  Modelos de entrada segun el payload de Grafana.
+  Input models for the Grafana webhook payload.
 
 app/schemas/alerts.py
-  Modelo interno NormalizedAlert.
+  Internal NormalizedAlert model.
 
 app/services/grafana_normalizer.py
-  Convierte payloads de Grafana en alertas normalizadas.
+  Converts Grafana payloads into normalized alerts.
 
 app/db/models/alert.py
-  Modelo persistente Alert.
+  Persistent Alert model.
 
 app/repositories/alert_repository.py
-  Guarda alertas normalizadas en PostgreSQL.
+  Converts normalized alerts into Alert rows and stages persistence.
 
 app/services/alert_ingestion_service.py
-  Orquesta normalizar, guardar y publicar evento.
+  Orchestrates normalization, persistence, and event publishing.
 
 app/events/message.py
-  Define AlertReceivedMessage.
+  Defines AlertReceivedMessage.
 
 app/events/publisher.py
-  Publica eventos en Redpanda/Kafka.
+  Publishes alert events to Redpanda/Kafka.
 
 app/events/consumer.py
-  Consume eventos desde alerts.received.
+  Consumes alerts.received, loads the persisted Alert, and calls the incident correlator.
 ```
 
-## Kafka, Redpanda, publishers y consumers
+## Kafka, Redpanda, Publishers, And Consumers
 
-Redpanda se esta usando como broker compatible con Kafka. Para Vigilia, se puede pensar como el servidor de eventos.
+Redpanda is used as a Kafka-compatible broker. In Vigilia, it is the event log between the API process and background processing.
 
-La configuracion actual apunta a:
+Current configuration:
 
 ```text
 bootstrap servers: localhost:9092
-topic principal: alerts.received
+main topic: alerts.received
 ```
 
-El modelo mental es:
+Mental model:
 
 ```text
 Publisher / Producer
-  escribe mensajes en un topic
+  writes messages to a topic
 
 Topic
-  canal/log donde se guardan eventos
+  durable event log/channel
 
 Consumer
-  lee mensajes de un topic
+  reads messages from a topic
 
 Worker
-  proceso en background que ejecuta un consumer
+  background process running a consumer
 ```
 
-En Vigilia:
+In Vigilia:
 
 ```text
-FastAPI publica eventos AlertReceived
-Redpanda guarda esos eventos en alerts.received
-app.events.consumer los lee
+FastAPI publishes AlertReceivedMessage events
+Redpanda stores those events in alerts.received
+app.events.consumer reads them
+the consumer calls incident_correlation_service.correlate_alert()
 ```
 
-El consumer actual es minimo: lee el evento, valida el JSON como `AlertReceivedMessage` y lo loguea. El siguiente paso es que ese consumer llame al servicio de correlacion de incidentes.
+The consumer is intentionally a thin adapter. It should connect Kafka to the application service, not contain the incident business rules itself.
 
-## Conceptos clave
+Current consumer behavior:
+
+```text
+1. Poll alerts.received.
+2. Decode the Kafka message value as UTF-8 JSON.
+3. Validate it as AlertReceivedMessage.
+4. Open a database Session.
+5. Load Alert by alert_id.
+6. Call correlate_alert(session, alert).
+7. Log the resulting incident status.
+```
+
+## Core Concepts
 
 ### Alert
 
-Una `Alert` es un evento concreto recibido y guardado en base de datos.
+An `Alert` is one concrete event received and stored in the database.
 
-Ejemplo:
+Example:
 
 ```text
 Alert #1
@@ -115,7 +138,7 @@ service=server-01.local
 received_at=12:00
 ```
 
-Si mas tarde llega el resolved, se guarda como otra fila:
+If Grafana later sends the resolved event, it is stored as another row:
 
 ```text
 Alert #2
@@ -125,45 +148,58 @@ service=server-01.local
 received_at=12:10
 ```
 
-Las dos filas son eventos distintos, aunque pertenecen a la misma instancia de alerta.
+Those two rows are separate events, even though they belong to the same alert instance.
 
 ### Fingerprint
 
-En Grafana, el fingerprint es un hash unico generado a partir del conjunto de labels y atributos de una instancia concreta de alerta.
+In Grafana, the fingerprint is a stable identity for a concrete alert instance.
 
-Para Vigilia significa:
+For Vigilia:
 
 ```text
-fingerprint = identidad estable de una instancia de alerta
+fingerprint = stable identity of one alert instance
 ```
 
-Sirve para unir el ciclo de vida de una alerta:
+It lets Vigilia match the lifecycle of one alert:
 
 ```text
 HostDown server-01.local firing   fingerprint=a1b2
 HostDown server-01.local resolved fingerprint=a1b2
 ```
 
-El fingerprint es muy util para emparejar `firing` y `resolved` de la misma instancia de alerta, pero no debe confundirse con un incidente.
+The fingerprint is useful for pairing `firing` and `resolved` events from the same alert instance, but it is not the same thing as an incident.
 
 ```text
-fingerprint identifica una alerta concreta
-incident agrupa varias alertas relacionadas
+fingerprint identifies one alert instance
+incident groups multiple related alert instances
 ```
+
+### Service
+
+`service` is Vigilia's first grouping key for incidents.
+
+It currently comes from normalization:
+
+```text
+labels["service"] or labels["instance"] or "unknown"
+```
+
+For a `firing` alert, Vigilia uses `service` to decide whether the alert belongs to a recent open incident.
 
 ### Incident
 
-Un `Incident` representa un problema operativo agrupado.
+An `Incident` represents an operational problem grouped from related alerts.
 
-Ejemplo:
+Example:
 
 ```text
 Incident #1
 service=server-01.local
 status=open
+severity=critical
 ```
 
-Puede contener varias alertas:
+It can contain multiple alert instances:
 
 ```text
 HostDown fingerprint=a1b2
@@ -171,13 +207,13 @@ HighCPU  fingerprint=c3d4
 DiskFull fingerprint=e5f6
 ```
 
-Aunque cada alerta tenga un fingerprint distinto, pueden formar parte del mismo incidente si afectan al mismo servicio o instancia y ocurren cerca en el tiempo.
+Even if each alert has a different fingerprint, they can belong to the same incident if they affect the same service and arrive close enough in time.
 
 ### IncidentAlert
 
-`IncidentAlert` es la tabla puente que une incidentes con alertas.
+`IncidentAlert` is the join table between incidents and alerts.
 
-Modelo conceptual:
+Conceptual model:
 
 ```text
 incidents
@@ -194,62 +230,68 @@ alerts
   alert-2 fingerprint=c3d4 status=firing
 ```
 
-Esta tabla permite reconstruir el timeline del incidente a partir de eventos concretos de alerta.
+This table allows Vigilia to reconstruct an incident timeline from the concrete alert events that created or changed it.
 
-## Regla funcional de correlacion v1
+## Incident Correlation Rule V1
 
-La primera version de correlacion debe ser determinista y facil de entender.
+The first correlation version is intentionally deterministic and easy to explain.
 
-### Cuando llega una alerta firing
+### When A Firing Alert Arrives
 
-Regla:
-
-```text
-Buscar incidente abierto reciente con el mismo service.
-
-Si existe:
-  asociar la alerta a ese incidente.
-
-Si no existe:
-  crear un incidente nuevo.
-```
-
-El `service` sale de la normalizacion:
+Rule:
 
 ```text
-labels["service"] o labels["instance"] o "unknown"
+Find a recent open incident with the same service.
+
+If one exists:
+  attach the alert to that incident.
+
+If none exists:
+  create a new incident.
+
+Update incident activity:
+  updated_at = alert.received_at
+  severity = highest current/incoming severity
 ```
 
-Para evitar que un incidente abierto durante demasiado tiempo absorba alertas no relacionadas, se usara una ventana temporal configurable:
+The correlation window prevents a long-running open incident from absorbing unrelated alerts forever.
+
+Current setting:
 
 ```text
-VIGILIA_INCIDENT_CORRELATION_WINDOW_MINUTES=30
+incident_correlation_window_minutes
 ```
 
-### Cuando llega una alerta resolved
-
-Regla:
+Environment variable:
 
 ```text
-Buscar incidente abierto que ya contenga una alerta con el mismo fingerprint.
-
-Si existe:
-  asociar el evento resolved a ese incidente.
-  recalcular el ultimo estado por fingerprint.
-
-Si no existe:
-  loguear que llego un resolved sin incidente abierto asociado.
+VIGILIA_INCIDENT_CORRELATION_WINDOW_MINUTES
 ```
 
-Para `resolved` se busca por fingerprint porque el resolved pertenece a una instancia concreta de alerta que ya habia estado firing.
+### When A Resolved Alert Arrives
 
-### Como decidir si un incidente se resuelve
+Rule:
 
-Un incidente no se resuelve solo porque llegue un `resolved`.
+```text
+Find an open incident that already contains an alert with the same fingerprint.
 
-Se resuelve cuando todos los fingerprints asociados al incidente tienen como ultimo estado conocido `resolved`.
+If one exists:
+  attach the resolved event to that incident.
+  recalculate the latest status per fingerprint.
 
-Ejemplo:
+If none exists:
+  log that the resolved alert has no open incident.
+```
+
+`resolved` is matched by fingerprint because it belongs to one concrete alert instance that was previously firing.
+
+### When An Incident Is Resolved
+
+An incident is not resolved just because one `resolved` alert arrives.
+
+It is resolved only when all fingerprints associated with that incident have latest status `resolved`.
+
+Example:
 
 ```text
 Incident #1
@@ -258,73 +300,69 @@ Incident #1
   cpu-api    resolved
 ```
 
-Ultimo estado por fingerprint:
+Latest status by fingerprint:
 
 ```text
 cpu-api    = resolved
 memory-api = firing
 ```
 
-El incidente sigue abierto.
+The incident stays open.
 
-Luego llega:
+Then:
 
 ```text
 memory-api resolved
 ```
 
-Ultimo estado:
+Latest status:
 
 ```text
 cpu-api    = resolved
 memory-api = resolved
 ```
 
-Entonces:
+Result:
 
 ```text
 Incident #1 -> resolved
 ```
 
-## Archivos nuevos para incidentes
+## Severity Rule
 
-La vertical de incidentes se organiza asi:
+Incident severity should keep the highest severity seen so far, instead of blindly taking the latest alert severity.
 
-```text
-app/db/models/incident.py
-  Modelo persistente Incident.
-
-app/db/models/incident_alert.py
-  Tabla puente entre Incident y Alert.
-
-app/repositories/incident_repository.py
-  Funciones de lectura/escritura para incidentes.
-
-app/services/incident_correlation_service.py
-  Reglas de negocio para crear, actualizar o resolver incidentes.
-```
-
-Tambien se tocaran:
+Current ranking:
 
 ```text
-app/core/config.py
-  Configuracion de ventana temporal.
-
-.env
-  Valor de VIGILIA_INCIDENT_CORRELATION_WINDOW_MINUTES.
-
-app/events/consumer.py
-  Para que el worker llame al correlator.
-
-migrations/versions/...
-  Migracion de incidents e incident_alerts.
+critical > warning > info > unknown
 ```
 
-## Responsabilidades por capa
+Example:
+
+```text
+Incident severity = critical
+Incoming alert severity = warning
+Result = critical
+```
+
+The current implementation keeps this helper local to `incident_repository.py` to avoid importing a service from a repository. This is acceptable for now because the function is small and used exactly where the incident model is updated.
+
+Future improvement:
+
+```text
+Normalize Grafana severity values at ingestion time.
+Examples:
+  warn -> warning
+  missing -> unknown
+  unsupported value -> unknown
+```
+
+## Layer Responsibilities
 
 ### Models
 
-Definen que existe en la base de datos.
+Models define what exists in the database.
 
 ```text
 Alert
@@ -334,143 +372,330 @@ IncidentAlert
 
 ### Repositories
 
-Saben leer y escribir en la base de datos, pero no deberian contener demasiada decision de negocio.
+Repositories know how to read and write database state. They prepare changes but do not commit transactions.
 
-Ejemplos:
+Examples:
 
 ```text
 find_recent_open_incident_for_service
 find_open_incident_by_fingerprint
 create_incident_from_alert
 attach_alert_to_incident
+update_incident_activity
 get_latest_alert_statuses_for_incident
 resolve_incident
 ```
 
 ### Services
 
-Aplican reglas de negocio.
+Services apply use cases and business rules. They own commit/rollback for the unit of work.
 
-El servicio central sera:
+Main incident service:
 
 ```text
 app/services/incident_correlation_service.py
 ```
 
-Su funcion principal:
+Main function:
 
 ```text
 correlate_alert(session, alert)
 ```
 
-Decide:
+It decides:
 
 ```text
-si alert.status == firing:
-  buscar/crear incidente y asociar alerta
+if alert.status == firing:
+  find/create incident and attach alert
 
-si alert.status == resolved:
-  buscar incidente por fingerprint
-  asociar resolved
-  cerrar incidente si ya no quedan fingerprints activos
+if alert.status == resolved:
+  find incident by fingerprint
+  attach resolved alert
+  close incident if no active fingerprints remain
 ```
 
 ### Events
 
-Conectan Kafka/Redpanda con la logica de negocio.
+Events connect Kafka/Redpanda with application logic.
 
-El consumer debe pasar de:
+The consumer converts:
 
 ```text
 AlertReceivedMessage
 ```
 
-a:
+into:
 
 ```text
-Alert cargada desde PostgreSQL
+Alert loaded from PostgreSQL
 ```
 
-y luego llamar a:
+and then calls:
 
 ```text
 correlate_alert(session, alert)
 ```
 
-## Flujo objetivo de incidentes
+## Transaction Rule
 
-El flujo completo objetivo queda asi:
+Repositories do not call `commit()` or `rollback()`.
 
-```text
-Grafana webhook
-  -> FastAPI
-  -> normalizar alertas
-  -> guardar Alert en PostgreSQL
-  -> publicar AlertReceivedMessage en alerts.received
-
-Consumer / worker
-  -> leer AlertReceivedMessage
-  -> cargar Alert por alert_id
-  -> llamar incident_correlation_service.correlate_alert
-  -> crear, actualizar o resolver Incident
-```
-
-## Ejemplo completo
-
-Llegan estas alertas:
+Services own transaction boundaries:
 
 ```text
-12:00 HostDown  server-01 fingerprint=a1b2 status=firing
-12:03 HighCPU   server-01 fingerprint=c3d4 status=firing
-12:10 HostDown  server-01 fingerprint=a1b2 status=resolved
-12:15 HighCPU   server-01 fingerprint=c3d4 status=resolved
+repositories:
+  session.add(...)
+  session.add_all(...)
+  return objects
+
+services:
+  commit
+  refresh
+  rollback on failure
 ```
 
-Resultado:
+Reason:
 
 ```text
-12:00
-  No hay incidente abierto.
-  Crear Incident #1.
-  Asociar HostDown firing.
-
-12:03
-  Hay incidente abierto reciente para server-01.
-  Asociar HighCPU firing.
-
-12:10
-  Buscar incidente abierto que contiene fingerprint=a1b2.
-  Asociar HostDown resolved.
-  Ultimos estados:
-    a1b2 = resolved
-    c3d4 = firing
-  Incident #1 sigue open.
-
-12:15
-  Buscar incidente abierto que contiene fingerprint=c3d4.
-  Asociar HighCPU resolved.
-  Ultimos estados:
-    a1b2 = resolved
-    c3d4 = resolved
-  Incident #1 pasa a resolved.
+One use case can involve multiple repository operations.
+Those operations should succeed or fail together.
 ```
 
-## Orden recomendado de implementacion
+This currently applies to:
 
-1. Terminar modelos `Incident` e `IncidentAlert`.
-2. Crear migracion Alembic para `incidents` e `incident_alerts`.
-3. Completar `incident_repository.py`.
-4. Crear `incident_correlation_service.py`.
-5. Conectar `app/events/consumer.py` con DB y correlator.
-6. Probar manualmente con Grafana, PostgreSQL y Redpanda.
-7. Dejar testing automatizado para el final de esta fase, como decision consciente.
+```text
+alert_repository.py + alert_ingestion_service.py
+incident_repository.py + incident_correlation_service.py
+```
 
-## Decisiones tomadas
+## Current Manual Test Script
 
-- No llamar a IA por alerta individual.
-- Usar IA mas adelante sobre incidentes y reportes, no sobre alertas sueltas.
-- Usar fingerprint para emparejar eventos de la misma instancia de alerta.
-- Usar service/instance y ventana temporal para agrupar alertas en incidentes.
-- Resolver incidentes solo cuando todos sus fingerprints asociados tengan ultimo estado `resolved`.
-- Mantener la primera version simple, determinista y explicable.
+A synthetic Grafana webhook sender exists:
 
+```text
+scripts/send_grafana_alert.py
+```
+
+Basic usage:
+
+```powershell
+uv run python scripts\send_grafana_alert.py --service payments-api --status firing --severity critical
+```
+
+Useful arguments:
+
+```text
+--service
+--status firing|resolved
+--severity
+--alert-name
+--instance
+--fingerprint
+--webhook-url
+```
+
+If `--fingerprint` is omitted, the script generates a deterministic fingerprint from:
+
+```text
+service + alert-name + instance
+```
+
+This means these two commands target the same alert instance:
+
+```powershell
+uv run python scripts\send_grafana_alert.py --service payments-api --alert-name CpuHigh --status firing --severity warning
+uv run python scripts\send_grafana_alert.py --service payments-api --alert-name CpuHigh --status resolved --severity warning
+```
+
+Example multi-alert incident test:
+
+```powershell
+uv run python scripts\send_grafana_alert.py --service payments-api --alert-name CpuHigh --status firing --severity warning
+uv run python scripts\send_grafana_alert.py --service payments-api --alert-name MemoryHigh --status firing --severity critical
+uv run python scripts\send_grafana_alert.py --service payments-api --alert-name CpuHigh --status resolved --severity warning
+uv run python scripts\send_grafana_alert.py --service payments-api --alert-name MemoryHigh --status resolved --severity critical
+```
+
+Expected result:
+
+```text
+CpuHigh firing       -> creates Incident open
+MemoryHigh firing    -> attaches to same Incident by service
+CpuHigh resolved     -> Incident stays open
+MemoryHigh resolved  -> Incident becomes resolved
+```
+
+## Useful Commands
+
+Infrastructure:
+
+```powershell
+docker compose up -d postgres redpanda grafana
+```
+
+Migrations:
+
+```powershell
+uv run alembic upgrade head
+uv run alembic current
+```
+
+API:
+
+```powershell
+uv run uvicorn app.main:app --reload
+```
+
+Consumer:
+
+```powershell
+uv run python -m app.events.consumer
+```
+
+Quick import check:
+
+```powershell
+uv run python -c "from app.services.incident_correlation_service import correlate_alert; print('ok')"
+```
+
+## End-To-End Test Checklist
+
+Before moving to the next sprint, verify:
+
+```text
+firing creates a new open incident
+second firing with same service attaches to the same incident
+resolved attaches by fingerprint
+incident stays open while any fingerprint is still firing
+incident becomes resolved when all fingerprints are resolved
+severity does not downgrade accidentally
+```
+
+This has been manually tested successfully with Grafana and with the synthetic script.
+
+## What Is Done
+
+Implemented:
+
+```text
+Grafana webhook ingestion
+Grafana payload normalization
+Alert persistence in PostgreSQL
+AlertReceivedMessage publishing to Redpanda/Kafka
+alerts.received consumer
+Incident and IncidentAlert models
+Alembic migration for incidents and incident_alerts
+Incident repository
+Incident correlation service
+Consumer connected to the correlator
+Incident severity high-watermark behavior
+Synthetic alert sending script
+Manual end-to-end validation
+```
+
+## Current Focus
+
+The current phase is still:
+
+```text
+Close alerts -> incidents properly.
+```
+
+The reason is deliberate: before building AI/reporting/product endpoints, Vigilia needs a reliable operational core:
+
+```text
+receive alert
+persist Alert
+publish event
+consume event
+create/update/resolve Incident
+```
+
+## Next Steps
+
+Recommended next steps before automated tests:
+
+1. Harden consumer offset handling.
+
+Current consumer likely relies on Kafka auto-commit behavior. A stronger version should:
+
+```text
+enable.auto.commit = False
+process message successfully
+commit Kafka offset manually
+do not commit offset if processing fails
+```
+
+Reason:
+
+```text
+If incident correlation fails, the event should not be marked as processed.
+```
+
+2. Review idempotency around incident correlation.
+
+Cases to reason about:
+
+```text
+Kafka redelivers the same alert event
+same firing event is processed twice
+same resolved event is processed twice
+```
+
+Current protections:
+
+```text
+alerts has a unique constraint for idempotency
+incident_alerts has a composite primary key
+attach_alert_to_incident skips existing links
+```
+
+Still worth validating behavior end-to-end.
+
+3. Normalize severity at ingestion.
+
+Reason:
+
+```text
+Grafana severity is an external free-form label.
+Vigilia should use stable internal severity values.
+```
+
+4. Add read endpoints for incidents.
+
+Initial API:
+
+```text
+GET /incidents
+GET /incidents/{incident_id}
+```
+
+Incident detail should eventually include associated alerts ordered by `received_at`.
+
+5. Add automated tests at the end of this phase.
+
+Suggested tests:
+
+```text
+highest severity keeps critical over warning
+firing creates incident
+second firing with same service attaches to same incident
+resolved is matched by fingerprint
+incident remains open while another fingerprint is firing
+incident resolves when all fingerprints are resolved
+consumer handler processes a valid AlertReceivedMessage
+```
+
+## Decisions Taken
+
+- Do not call AI for each individual alert.
+- Use AI later on incidents and reports, not on raw alert events.
+- Use fingerprint to pair events from the same alert instance.
+- Use service/instance plus a time window to group alerts into incidents.
+- Resolve incidents only when all associated fingerprints have latest status `resolved`.
+- Keep the first correlation version simple, deterministic, and explainable.
+- Keep repositories free of transaction ownership.
+- Keep services responsible for commit/rollback.
+- Keep the consumer as a thin adapter.
+- Avoid importing services from repositories.
+- Keep tests for the end of this stabilization phase.

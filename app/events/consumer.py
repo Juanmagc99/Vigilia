@@ -20,6 +20,7 @@ def create_alert_received_consumer() -> Consumer:
             "bootstrap.servers": settings.kafka_bootstrap_servers,
             "group.id": "vigilia-alert-correlator",
             "auto.offset.reset": "earliest",
+            "enable.auto.commit": False,
         }
     )
 
@@ -77,8 +78,10 @@ def run_alert_received_consumer() -> None:
                 raw_value = kafka_message.value().decode("utf-8") # type: ignore
                 message = AlertReceivedMessage.model_validate_json(raw_value)
                 handle_alert_received(message)
+                consumer.commit(message=kafka_message)
             except ValidationError as exc:
                 logger.warning("Invalid alert event message error=%s", exc)
+                consumer.commit(message=kafka_message)
             except AppError:
                 logger.exception("Application error while handling alert event")
             except Exception:
