@@ -8,6 +8,14 @@ from app.db.models.incident import Incident
 from app.db.models.incident_alert import IncidentAlert
 
 
+SEVERITY_RANK = {
+    "unknown": 0,
+    "info": 1,
+    "warning": 2,
+    "critical": 3,
+}
+
+
 def find_recent_open_incident_for_service(
     session: Session,
     service: str,
@@ -80,8 +88,10 @@ def update_incident_activity(
 ) -> Incident:
     incident.updated_at = alert.received_at
 
-    if alert.severity != "unknown":
-        incident.severity = alert.severity
+    incident.severity = _highest_severity(
+        current=incident.severity,
+        incoming=alert.severity,
+    )
 
     session.add(incident)
 
@@ -121,3 +131,13 @@ def get_latest_alert_statuses_for_incident(
         latest_by_fingerprint[alert.fingerprint] = alert.status
 
     return latest_by_fingerprint
+
+
+def _highest_severity(current: str, incoming: str) -> str:
+    current_rank = SEVERITY_RANK.get(current, SEVERITY_RANK["unknown"])
+    incoming_rank = SEVERITY_RANK.get(incoming, SEVERITY_RANK["unknown"])
+
+    if incoming_rank > current_rank:
+        return incoming
+
+    return current
