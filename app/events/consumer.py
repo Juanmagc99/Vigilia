@@ -7,8 +7,7 @@ from app.core.config import settings
 from app.core.logging import configure_logging, get_logger
 from app.db.session import engine
 from app.events.message import AlertReceivedMessage
-from app.repositories.alert_repository import get_alert_by_id
-from app.services.incident_correlation_service import correlate_alert
+from app.services.alert_event_service import handle_alert_received_event
 
 
 logger = get_logger(__name__)
@@ -27,33 +26,9 @@ def create_alert_received_consumer() -> Consumer:
 
 def handle_alert_received(message: AlertReceivedMessage) -> None:
     with Session(engine) as session:
-        alert = get_alert_by_id(session, message.alert_id)
-
-        if alert is None:
-            logger.warning(
-                "Alert not found for event alert_id=%s event_type=%s",
-                message.alert_id,
-                message.event_type,
-            )
-            return
-
-        incident = correlate_alert(session=session, alert=alert)
-
-        if incident is None:
-            logger.info(
-                "Consumed alert event without incident alert_id=%s status=%s fingerprint=%s",
-                alert.id,
-                alert.status,
-                alert.fingerprint,
-            )
-            return
-
-        logger.info(
-            "Correlated alert event alert_id=%s incident_id=%s incident_status=%s service=%s",
-            alert.id,
-            incident.id,
-            incident.status,
-            incident.service,
+        handle_alert_received_event(
+            session=session,
+            message=message,
         )
 
 

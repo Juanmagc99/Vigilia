@@ -133,6 +133,29 @@ def get_latest_alert_statuses_for_incident(
     return latest_by_fingerprint
 
 
+def find_incidents(session: Session) -> list[Incident]:
+    statement = select(Incident).order_by(desc(Incident.updated_at))
+    return list(session.exec(statement).all())
+
+def find_incident_by_id(
+    session: Session,
+    incident_id: UUID
+) -> Incident | None:
+    return session.get(Incident, incident_id)
+
+def find_alerts_by_incident(
+    session: Session,
+    incident_id: UUID
+) -> list[Alert]:
+    statement = (
+        select(Alert)
+        .join(IncidentAlert, IncidentAlert.alert_id == Alert.id) #type: ignore
+        .where(IncidentAlert.incident_id == incident_id)
+        .order_by(asc(Alert.received_at))
+    )
+
+    return list(session.exec(statement).all())
+
 def _highest_severity(current: str, incoming: str) -> str:
     current_rank = SEVERITY_RANK.get(current, SEVERITY_RANK["unknown"])
     incoming_rank = SEVERITY_RANK.get(incoming, SEVERITY_RANK["unknown"])
