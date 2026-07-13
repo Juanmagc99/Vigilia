@@ -41,6 +41,18 @@ class ExternalServiceAppError(AppError):
     default_message = "External service error"
 
 
+class LLMProviderAppError(ExternalServiceAppError):
+    error_type = "llm_error"
+    default_code = "llm_provider_error"
+    default_message = "LLM provider request failed"
+
+
+class LLMTimeoutAppError(LLMProviderAppError):
+    status_code = 504
+    default_code = "llm_timeout"
+    default_message = "LLM provider timed out"
+
+
 class NotFoundAppError(AppError):
     status_code = 404
     error_type = "not_found"

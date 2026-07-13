@@ -591,17 +591,14 @@ Consumer connected to the correlator
 Incident severity high-watermark behavior
 Synthetic alert sending script
 Manual end-to-end validation
+Manual Kafka offset commits after successful processing
+Application error response schemas
+Incident read service and read endpoints
 ```
 
 ## Current Focus
 
-The current phase is still:
-
-```text
-Close alerts -> incidents properly.
-```
-
-The reason is deliberate: before building AI/reporting/product endpoints, Vigilia needs a reliable operational core:
+The alerts-to-incidents operational core is functionally complete and manually validated.
 
 ```text
 receive alert
@@ -609,81 +606,124 @@ persist Alert
 publish event
 consume event
 create/update/resolve Incident
+inspect incidents through the API
 ```
 
-## Next Steps
+The next sprint is the first AI capability: generate a structured operational report for an existing incident. AI will work on an `IncidentDetail`, never on each raw incoming alert.
 
-Recommended next steps before automated tests:
+## Current API
 
-1. Harden consumer offset handling.
-
-Current consumer likely relies on Kafka auto-commit behavior. A stronger version should:
-
-```text
-enable.auto.commit = False
-process message successfully
-commit Kafka offset manually
-do not commit offset if processing fails
-```
-
-Reason:
-
-```text
-If incident correlation fails, the event should not be marked as processed.
-```
-
-2. Review idempotency around incident correlation.
-
-Cases to reason about:
-
-```text
-Kafka redelivers the same alert event
-same firing event is processed twice
-same resolved event is processed twice
-```
-
-Current protections:
-
-```text
-alerts has a unique constraint for idempotency
-incident_alerts has a composite primary key
-attach_alert_to_incident skips existing links
-```
-
-Still worth validating behavior end-to-end.
-
-3. Normalize severity at ingestion.
-
-Reason:
-
-```text
-Grafana severity is an external free-form label.
-Vigilia should use stable internal severity values.
-```
-
-4. Add read endpoints for incidents.
-
-Initial API:
+Implemented and manually tested:
 
 ```text
 GET /incidents
 GET /incidents/{incident_id}
 ```
 
-Incident detail should eventually include associated alerts ordered by `received_at`.
+The detail endpoint returns the incident and its associated alerts ordered by `received_at`. Errors use the shared application error format and are documented in the OpenAPI schema.
 
-5. Add automated tests at the end of this phase.
+## Current Consumer Reliability
 
-Suggested tests:
+The consumer now uses manual Kafka offset commits:
+
+```text
+enable.auto.commit = False
+process and correlate the message
+commit the offset only after successful processing
+```
+
+Behavior on failures:
+
+```text
+invalid event payload
+  -> log it and commit the offset, because retrying a malformed message cannot fix it
+
+application/database/unexpected processing error
+  -> log it and do not commit the offset, so Kafka can redeliver it
+```
+
+Current idempotency protections:
+
+```text
+alerts has a unique constraint
+incident_alerts has a composite primary key
+attach_alert_to_incident avoids duplicating an existing link
+```
+
+## Next Sprint: AI Incident Reports
+
+Goal:
+
+```text
+IncidentDetail
+  -> render a controlled prompt
+  -> call an LLM provider behind an internal interface
+  -> validate structured output
+  -> return an incident report
+```
+
+Proposed first report fields:
+
+```text
+summary
+probable_cause
+impact
+timeline
+recommended_actions
+missing_information
+confidence
+```
+
+Recommended module shape:
+
+```text
+app/prompts/incident_report.j2
+  Jinja template containing prompt wording and output instructions.
+
+app/services/prompt_renderer.py
+  Loads and renders templates with data from IncidentDetail.
+
+app/llm/client.py
+  Provider-agnostic LLMClient protocol/interface.
+
+app/llm/litellm_client.py
+  First implementation using LiteLLM, which can route to OpenAI and other providers.
+
+app/schemas/reports.py
+  Pydantic contract for the structured report returned by the model.
+
+app/services/incident_report_service.py
+  Loads the incident, renders the prompt, calls the LLM client, and validates the report.
+```
+
+Initial endpoint, after the service is ready:
+
+```text
+POST /incidents/{incident_id}/report
+```
+
+The provider-specific API key and model name belong in environment configuration. The application service should depend on `LLMClient`, not directly on OpenAI or LiteLLM. This makes the first OpenAI integration practical without making the domain code provider-dependent.
+
+## Remaining Work
+
+1. Implement the AI incident-report MVP described above.
+
+2. Normalize severity at ingestion so external Grafana labels become a stable internal set such as `critical`, `warning`, `info`, and `unknown`.
+
+3. Add automated tests once the current phase is stable.
+
+Suggested coverage:
 
 ```text
 highest severity keeps critical over warning
-firing creates incident
-second firing with same service attaches to same incident
+firing creates an incident
+second firing with the same service attaches to the same incident
 resolved is matched by fingerprint
 incident remains open while another fingerprint is firing
 incident resolves when all fingerprints are resolved
-consumer handler processes a valid AlertReceivedMessage
+consumer commits only after successful processing
+incident read endpoints return the expected schemas
+incident report service validates the model output
 ```
 
 ## Decisions Taken
@@ -699,3 +739,6 @@ consumer handler processes a valid AlertReceivedMessage
 - Keep the consumer as a thin adapter.
 - Avoid importing services from repositories.
 - Keep tests for the end of this stabilization phase.
+- Keep LLM providers behind an internal interface.
+- Use Jinja templates to keep prompt text separate from Python orchestration.
+- Generate AI reports from incidents, not raw alert events.
