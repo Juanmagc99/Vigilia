@@ -1,5 +1,5 @@
-from litellm import completion
-from litellm.exceptions import APIError, Timeout
+from litellm import acompletion
+from litellm.exceptions import APIError, RateLimitError, Timeout
 
 from app.core.errors import LLMProviderAppError, LLMTimeoutAppError
 
@@ -16,9 +16,9 @@ class LLMClient:
         self._api_key = api_key
         self._timeout_seconds = timeout_seconds
 
-    def generate(self, *, prompt: str) -> str:
+    async def generate(self, *, prompt: str) -> str:
         try:
-            response = completion(
+            response = await acompletion(
                 model=self._model,
                 api_key=self._api_key,
                 timeout=self._timeout_seconds,
@@ -38,7 +38,7 @@ class LLMClient:
                     "timeout_seconds": self._timeout_seconds,
                 },
             ) from exc
-        except APIError as exc:
+        except (APIError, RateLimitError) as exc:
             raise LLMProviderAppError(
                 metadata={
                     "operation": "generate_llm_response",

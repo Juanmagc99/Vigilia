@@ -1,4 +1,4 @@
-from pydantic import computed_field
+from pydantic import SecretStr, computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -17,6 +17,10 @@ class Settings(BaseSettings):
 
     incident_correlation_window_minutes: int = 45
 
+    llm_api_key: SecretStr | None = None
+    llm_model: str | None = None
+    llm_timeout_seconds: float = 35.0
+
     @computed_field
     @property
     def database_url(self) -> str:
@@ -25,7 +29,11 @@ class Settings(BaseSettings):
             f"@{self.db_host}:{self.db_port}/{self.db_name}"
         )
 
-    model_config = SettingsConfigDict(env_prefix="VIGILIA_")
+    model_config = SettingsConfigDict(
+        env_prefix="VIGILIA_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+    )
 
 
 settings = Settings()
