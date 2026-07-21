@@ -16,6 +16,10 @@ class LLMClient:
         self._api_key = api_key
         self._timeout_seconds = timeout_seconds
 
+    @property
+    def model(self) -> str:
+        return self._model
+
     async def generate(self, *, prompt: str) -> str:
         try:
             response = await acompletion(

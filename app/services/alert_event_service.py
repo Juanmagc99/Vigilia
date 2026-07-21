@@ -2,7 +2,7 @@ from sqlmodel import Session
 
 from app.core.logging import get_logger
 from app.events.message import AlertReceivedMessage
-from app.repositories.alert_repository import get_alert_by_id
+from app.repositories.alert_repository import find_alert_by_id
 from app.services.incident_correlation_service import correlate_alert
 
 
@@ -13,7 +13,7 @@ def handle_alert_received_event(
     session: Session,
     message: AlertReceivedMessage,
 ) -> None:
-    alert = get_alert_by_id(session, message.alert_id)
+    alert = find_alert_by_id(session, message.alert_id)
 
     if alert is None:
         logger.warning(

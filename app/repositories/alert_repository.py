@@ -37,5 +37,5 @@ def save_alerts(
     return alerts
 
 
-def get_alert_by_id(session: Session, alert_id: UUID) -> Alert | None:
+def find_alert_by_id(session: Session, alert_id: UUID) -> Alert | None:
     return session.get(Alert, alert_id)

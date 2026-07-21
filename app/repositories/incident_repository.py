@@ -112,7 +112,7 @@ def resolve_incident(
     return incident
 
 
-def get_latest_alert_statuses_for_incident(
+def find_latest_alert_statuses_for_incident(
     session: Session,
     incident_id: UUID,
 ) -> dict[str, str]:

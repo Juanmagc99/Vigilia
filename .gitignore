@@ -11,3 +11,6 @@ wheels/
 .venv
 .env
 vigilia-ws.code-workspace
+
+VIGILIA_FLOW.md
+VIGILIA_ROADMAP.md

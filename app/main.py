@@ -7,9 +7,9 @@ from app.api.exception_handlers import register_exception_handlers
 from app.api.router import api_router
 from app.core.config import settings
 from app.core.logging import configure_logging
-from app.services.incident_report_service import IncidentReportService
 from app.services.llm_client import LLMClient
 from app.services.prompt_renderer import PromptRenderer
+from app.services.report_generation_service import ReportGenerationService
 
 
 configure_logging()
@@ -26,12 +26,12 @@ async def lifespan(app: FastAPI):
             api_key=settings.llm_api_key.get_secret_value(),
             timeout_seconds=settings.llm_timeout_seconds,
         )
-        app.state.incident_report_service = IncidentReportService(
+        app.state.report_generation_service = ReportGenerationService(
             prompt_renderer=prompt_renderer,
             llm_client=llm_client,
         )
     else:
-        app.state.incident_report_service = None
+        app.state.report_generation_service = None
 
     yield
 

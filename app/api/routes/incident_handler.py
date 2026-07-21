@@ -7,19 +7,19 @@ from app.core.errors import InternalAppError
 from app.db.session import DatabaseSession
 from app.schemas.errors import ErrorResponse
 from app.schemas.incidents import IncidentDetail, IncidentSummary
-from app.schemas.reports import IncidentReport
+from app.schemas.reports import ReportRead
 from app.services.incident_service import (
     get_incident_detail,
     list_incident_summaries,
 )
-from app.services.incident_report_service import IncidentReportService
+from app.services.report_generation_service import ReportGenerationService
 
 
 router = APIRouter(prefix="/incidents", tags=["incidents"])
 
 
-def get_incident_report_service(request: Request) -> IncidentReportService:
-    service = request.app.state.incident_report_service
+def get_report_generation_service(request: Request) -> ReportGenerationService:
+    service = request.app.state.report_generation_service
 
     if service is None:
         raise InternalAppError(
@@ -36,9 +36,9 @@ def get_incident_report_service(request: Request) -> IncidentReportService:
     return service
 
 
-IncidentReportServiceDependency = Annotated[
-    IncidentReportService,
-    Depends(get_incident_report_service),
+ReportGenerationServiceDependency = Annotated[
+    ReportGenerationService,
+    Depends(get_report_generation_service),
 ]
 
 
@@ -84,7 +84,7 @@ def get_incident(
 
 @router.post(
     "/{incident_id}/report",
-    response_model=IncidentReport,
+    response_model=ReportRead,
     responses={
         404: {
             "model": ErrorResponse,
@@ -106,6 +106,6 @@ def get_incident(
 )
 async def generate_incident_report(
     incident_id: UUID,
-    incident_report_service: IncidentReportServiceDependency,
-) -> IncidentReport:
-    return await incident_report_service.generate(incident_id=incident_id)
+    report_generation_service: ReportGenerationServiceDependency,
+) -> ReportRead:
+    return await report_generation_service.generate(incident_id=incident_id)
