@@ -13,7 +13,7 @@ from app.repositories.incident_repository import (
     create_incident_from_alert,
     find_open_incident_by_fingerprint,
     find_recent_open_incident_for_service,
-    find_latest_alert_statuses_for_incident,
+    find_latest_alert_statuses_by_incident_id,
     resolve_incident,
     update_incident_activity,
 )
@@ -91,7 +91,7 @@ def correlate_resolved_alert(session: Session, alert: Alert) -> Incident | None:
 
     attach_alert_to_incident(session, incident, alert)
 
-    latest_statuses = find_latest_alert_statuses_for_incident(
+    latest_statuses = find_latest_alert_statuses_by_incident_id(
         session=session,
         incident_id=incident.id,
     )

@@ -7,9 +7,9 @@ from app.core.errors import DatabaseAppError, NotFoundAppError
 from app.db.models.alert import Alert
 from app.db.models.incident import Incident
 from app.repositories.incident_repository import (
-    find_alerts_by_incident,
+    find_alerts_by_incident_id,
     find_incident_by_id,
-    find_incidents,
+    find_all_incidents,
 )
 from app.schemas.alerts import AlertRead
 from app.schemas.incidents import IncidentDetail, IncidentSummary
@@ -17,7 +17,7 @@ from app.schemas.incidents import IncidentDetail, IncidentSummary
 
 def list_incident_summaries(session: Session) -> list[IncidentSummary]:
     try:
-        incidents = find_incidents(session)
+        incidents = find_all_incidents(session)
 
         return [
             _incident_to_summary(incident)
@@ -53,7 +53,7 @@ def get_incident_detail(
                 },
             )
 
-        alerts = find_alerts_by_incident(
+        alerts = find_alerts_by_incident_id(
             session=session,
             incident_id=incident_id,
         )

@@ -24,7 +24,7 @@ def get_report(
 
     return ReportRead.model_validate(report)
 
-def list_reports_by_incident(
+def list_reports_for_incident(
     session: Session,
     incident_id: UUID
 ) -> list[ReportRead]:

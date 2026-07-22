@@ -13,6 +13,7 @@ from app.services.incident_service import (
     list_incident_summaries,
 )
 from app.services.report_generation_service import ReportGenerationService
+from app.services.report_service import list_reports_for_incident
 
 
 router = APIRouter(prefix="/incidents", tags=["incidents"])
@@ -56,6 +57,26 @@ def list_incidents(
     session: DatabaseSession,
 ) -> list[IncidentSummary]:
     return list_incident_summaries(session)
+
+
+@router.get(
+    "/{incident_id}/reports",
+    response_model=list[ReportRead],
+    responses={
+        500: {
+            "model": ErrorResponse,
+            "description": "Could not list reports for the incident",
+        },
+    },
+)
+def list_incident_reports(
+    incident_id: UUID,
+    session: DatabaseSession,
+) -> list[ReportRead]:
+    return list_reports_for_incident(
+        session=session,
+        incident_id=incident_id,
+    )
 
 
 @router.get(

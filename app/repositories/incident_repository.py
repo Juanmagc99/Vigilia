@@ -112,7 +112,7 @@ def resolve_incident(
     return incident
 
 
-def find_latest_alert_statuses_for_incident(
+def find_latest_alert_statuses_by_incident_id(
     session: Session,
     incident_id: UUID,
 ) -> dict[str, str]:
@@ -133,7 +133,7 @@ def find_latest_alert_statuses_for_incident(
     return latest_by_fingerprint
 
 
-def find_incidents(session: Session) -> list[Incident]:
+def find_all_incidents(session: Session) -> list[Incident]:
     statement = select(Incident).order_by(desc(Incident.updated_at))
     return list(session.exec(statement).all())
 
@@ -143,7 +143,7 @@ def find_incident_by_id(
 ) -> Incident | None:
     return session.get(Incident, incident_id)
 
-def find_alerts_by_incident(
+def find_alerts_by_incident_id(
     session: Session,
     incident_id: UUID
 ) -> list[Alert]:

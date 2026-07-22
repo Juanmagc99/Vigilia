@@ -8,6 +8,7 @@ from app.core.logging import get_logger
 from app.db.models.alert import Alert
 from app.events.publisher import AlertEventPublisher
 from app.repositories.alert_repository import save_alerts
+from app.schemas.alerts import NormalizedAlert
 from app.schemas.grafana import GrafanaWebhookPayload
 from app.services.grafana_normalizer import normalize_grafana_payload
 
@@ -30,9 +31,13 @@ def ingest_grafana_payload(
     publisher: AlertEventPublisher,
 ) -> AlertIngestionResult:
     normalized_alerts = normalize_grafana_payload(payload)
+    alerts = [
+        _build_alert_from_normalized(normalized_alert)
+        for normalized_alert in normalized_alerts
+    ]
 
     try:
-        saved_alerts = save_alerts(session, normalized_alerts)
+        saved_alerts = save_alerts(session, alerts)
         session.commit()
 
         for alert in saved_alerts:
@@ -62,4 +67,25 @@ def ingest_grafana_payload(
         alerts_persisted=len(saved_alerts),
         events_published=len(saved_alerts),
         saved_alerts=saved_alerts,
+    )
+
+
+def _build_alert_from_normalized(normalized_alert: NormalizedAlert) -> Alert:
+    return Alert(
+        source=normalized_alert.source,
+        fingerprint=normalized_alert.fingerprint,
+        status=normalized_alert.status,
+        alert_name=normalized_alert.alert_name,
+        service=normalized_alert.service,
+        severity=normalized_alert.severity,
+        summary=normalized_alert.summary,
+        description=normalized_alert.description,
+        labels=normalized_alert.labels,
+        annotations=normalized_alert.annotations,
+        starts_at=normalized_alert.starts_at,
+        ends_at=normalized_alert.ends_at,
+        received_at=normalized_alert.received_at,
+        dashboard_url=normalized_alert.dashboard_url,
+        panel_url=normalized_alert.panel_url,
+        silence_url=normalized_alert.silence_url,
     )
