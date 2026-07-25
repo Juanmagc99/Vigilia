@@ -1,50 +1,134 @@
 services:
-  grafana:
-    image: grafana/grafana-oss:latest
-    container_name: vigilia-grafana
-    ports:
-      - "3000:3000"
-    environment:
-      GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: admin
-    volumes:
-      - grafana-data:/var/lib/grafana
-
   postgres:
-    image: postgres:17
-    container_name: vigilia-postgres
-    ports:
-      - "5432:5432"
+    image: postgres:17.10
     environment:
       POSTGRES_USER: vigilia
       POSTGRES_PASSWORD: vigilia
       POSTGRES_DB: vigilia
+    ports:
+      - "5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vigilia -d vigilia"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   redpanda:
-    image: redpandadata/redpanda:latest
-    container_name: vigilia-redpanda
+    image: docker.redpanda.com/redpandadata/redpanda:v26.1.14
     command:
       - redpanda
       - start
-      - --overprovisioned
+      - --kafka-addr
+      - internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr
+      - internal://redpanda:9092,external://localhost:19092
+      - --rpc-addr
+      - redpanda:33145
+      - --advertise-rpc-addr
+      - redpanda:33145
+      - --mode
+      - dev-container
       - --smp
       - "1"
-      - --memory
-      - "512M"
-      - --reserve-memory
-      - "0M"
-      - --node-id
-      - "0"
-      - --check=false
-      - --kafka-addr
-      - "PLAINTEXT://0.0.0.0:9092"
-      - --advertise-kafka-addr
-      - "PLAINTEXT://localhost:9092"
+      - --default-log-level=info
     ports:
-      - "9092:9092"
+      - "19092:19092"
+      - "9644:9644"
+    volumes:
+      - redpanda-data:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD", "rpk", "cluster", "info"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+
+  api:
+    image: vigilia:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    environment:
+      VIGILIA_ENVIRONMENT: docker
+      VIGILIA_DB_HOST: postgres
+      VIGILIA_DB_PORT: 5432
+      VIGILIA_DB_NAME: vigilia
+      VIGILIA_DB_USER: vigilia
+      VIGILIA_DB_PASSWORD: vigilia
+      VIGILIA_KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      interval: 30s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
+    restart: unless-stopped
+
+  consumer:
+    image: vigilia:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["python", "-m", "app.events.consumer"]
+    env_file:
+      - .env
+    environment:
+      VIGILIA_ENVIRONMENT: docker
+      VIGILIA_DB_HOST: postgres
+      VIGILIA_DB_PORT: 5432
+      VIGILIA_DB_NAME: vigilia
+      VIGILIA_DB_USER: vigilia
+      VIGILIA_DB_PASSWORD: vigilia
+      VIGILIA_KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+    restart: unless-stopped
+
+  migrate:
+    image: vigilia:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["alembic", "upgrade", "head"]
+    env_file:
+      - .env
+    environment:
+      VIGILIA_DB_HOST: postgres
+      VIGILIA_DB_PORT: 5432
+      VIGILIA_DB_NAME: vigilia
+      VIGILIA_DB_USER: vigilia
+      VIGILIA_DB_PASSWORD: vigilia
+    depends_on:
+      postgres:
+        condition: service_healthy
+    profiles:
+      - tools
+    restart: "no"
+
+  grafana:
+    image: grafana/grafana-oss:latest
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
 
 volumes:
   grafana-data:
   postgres-data:
+  redpanda-data:
