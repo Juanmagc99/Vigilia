@@ -1,4 +1,4 @@
-from pydantic import SecretStr, computed_field
+from pydantic import Field, SecretStr, computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -20,6 +20,16 @@ class Settings(BaseSettings):
     llm_api_key: SecretStr | None = None
     llm_model: str | None = None
     llm_timeout_seconds: float = 35.0
+
+    grafana_webhook_hmac_secret: SecretStr | None = None
+
+    grafana_webhook_max_age_seconds: int = Field(
+        default=300,
+        gt=0,
+        le=3600,
+    )
+
+    api_token: SecretStr | None = None
 
     @computed_field
     @property

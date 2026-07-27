@@ -1,12 +1,17 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
+from app.api.security import verify_grafana_signature
 from app.db.session import DatabaseSession
 from app.events.publisher import AlertEventPublisherDependency
 from app.schemas.grafana import GrafanaWebhookPayload
 from app.services.alert_ingestion_service import ingest_grafana_payload
 
 
-router = APIRouter(prefix="/webhooks/grafana", tags=["grafana"])
+router = APIRouter(
+    prefix="/webhooks/grafana",
+    tags=["grafana"],
+    dependencies=[Depends(verify_grafana_signature)],
+)
 
 
 @router.post("")

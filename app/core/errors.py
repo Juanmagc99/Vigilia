@@ -72,3 +72,16 @@ class InternalAppError(AppError):
     error_type = "internal_error"
     default_code = "internal_server_error"
     default_message = "Unexpected internal server error"
+
+class AuthenticationAppError(AppError):
+    status_code = 401
+    error_type = "authentication_error"
+    default_code = "authentication_failed"
+    default_message = "Authentication failed"
+
+
+class SecurityConfigurationAppError(AppError):
+    status_code = 503
+    error_type = "configuration_error"
+    default_code = "security_not_configured"
+    default_message = "Security is not configured"
