@@ -8,11 +8,16 @@ from app.schemas.reports import ReportRead
 
 def test_generate_report_returns_error_when_llm_is_not_configured(
     client,
+    configured_api_security,
+    api_authorization_headers,
 ) -> None:
     app.state.report_generation_service = None
     incident_id = uuid4()
 
-    response = client.post(f"/incidents/{incident_id}/report")
+    response = client.post(
+        f"/incidents/{incident_id}/report",
+        headers=api_authorization_headers,
+    )
 
     assert response.status_code == 500
     assert response.json()["error"]["type"] == "internal_error"
@@ -23,6 +28,8 @@ def test_generate_report_returns_generated_report(
     client,
     incident_id,
     valid_report_content,
+    configured_api_security,
+    api_authorization_headers,
 ) -> None:
     expected_report = ReportRead(
         id=uuid4(),
@@ -40,7 +47,10 @@ def test_generate_report_returns_generated_report(
         FakeReportGenerationService
     )
 
-    response = client.post(f"/incidents/{incident_id}/report")
+    response = client.post(
+        f"/incidents/{incident_id}/report",
+        headers=api_authorization_headers,
+    )
 
     assert response.status_code == 200
     assert response.json()["id"] == str(expected_report.id)

@@ -1,3 +1,5 @@
+import hashlib
+import hmac
 import json
 from collections.abc import Callable, Generator
 from datetime import datetime, timezone
@@ -6,11 +8,19 @@ from uuid import UUID, uuid4
 
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import SecretStr
 
+import app.api.security as security_module
+from app.core.config import settings
 from app.db.models.alert import Alert
 from app.main import app
 from app.schemas.incidents import IncidentDetail
 from app.schemas.reports import ReportContent
+
+
+TEST_GRAFANA_SECRET = "test-grafana-hmac-secret"
+TEST_API_TOKEN = "test-api-token"
+FIXED_NOW = 1_750_000_000
 
 
 @pytest.fixture
@@ -74,6 +84,71 @@ def grafana_payload() -> dict:
         / "grafana_notification_test.json"
     )
     return json.loads(fixture_path.read_text(encoding="utf-8"))
+
+
+@pytest.fixture
+def configured_grafana_security(monkeypatch) -> None:
+    monkeypatch.setattr(
+        settings,
+        "grafana_webhook_hmac_secret",
+        SecretStr(TEST_GRAFANA_SECRET),
+    )
+    monkeypatch.setattr(
+        settings,
+        "grafana_webhook_max_age_seconds",
+        300,
+    )
+    monkeypatch.setattr(
+        security_module.time,
+        "time",
+        lambda: FIXED_NOW,
+    )
+
+
+@pytest.fixture
+def configured_api_security(monkeypatch) -> None:
+    monkeypatch.setattr(
+        settings,
+        "api_token",
+        SecretStr(TEST_API_TOKEN),
+    )
+
+
+@pytest.fixture
+def api_authorization_headers() -> dict[str, str]:
+    return {"Authorization": f"Bearer {TEST_API_TOKEN}"}
+
+
+@pytest.fixture
+def signed_grafana_request() -> Callable:
+    def build_request(
+        payload: dict,
+        *,
+        timestamp: str | None = None,
+        secret: str = TEST_GRAFANA_SECRET,
+        body_to_sign: bytes | None = None,
+    ) -> tuple[bytes, dict[str, str]]:
+        body = json.dumps(
+            payload,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")
+        request_timestamp = timestamp or str(FIXED_NOW)
+        signed_body = body if body_to_sign is None else body_to_sign
+        signed_payload = request_timestamp.encode("utf-8") + b":" + signed_body
+        signature = hmac.new(
+            key=secret.encode("utf-8"),
+            msg=signed_payload,
+            digestmod=hashlib.sha256,
+        ).hexdigest()
+
+        return body, {
+            "Content-Type": "application/json",
+            "X-Grafana-Alerting-Signature": signature,
+            "X-Grafana-Alerting-Timestamp": request_timestamp,
+        }
+
+    return build_request
 
 
 class FakePromptRenderer:

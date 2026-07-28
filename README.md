@@ -131,23 +131,55 @@ Configuration is read through Pydantic settings. Every setting uses the `VIGILIA
 | `VIGILIA_LLM_API_KEY` | — | For reports | API key passed to LiteLLM. Keep it out of version control. |
 | `VIGILIA_LLM_MODEL` | — | For reports | LiteLLM model identifier, such as `openai/gpt-4o-mini`. |
 | `VIGILIA_LLM_TIMEOUT_SECONDS` | `35` | No | Maximum LLM request duration in seconds. |
+| `VIGILIA_GRAFANA_WEBHOOK_HMAC_SECRET` | — | For Grafana webhooks | Shared secret used to verify the webhook HMAC-SHA256 signature. |
+| `VIGILIA_GRAFANA_WEBHOOK_MAX_AGE_SECONDS` | `300` | No | Maximum accepted age for a signed Grafana request. |
+| `VIGILIA_API_TOKEN` | — | For `/incidents` | Bearer token required by incident and report endpoints. |
 
 `VIGILIA_LLM_API_KEY` and `VIGILIA_LLM_MODEL` are optional for alert ingestion and incident correlation. Both are required to enable `POST /incidents/{incident_id}/report`; otherwise that endpoint returns an `llm_not_configured` error.
 
 > Do not commit `.env`. It is intentionally ignored by Git. Commit safe defaults and documentation to `.env.example` instead.
 
+## Security
+
+Vigilia fails closed for protected routes: a Grafana webhook cannot be ingested without a configured HMAC secret, and incident routes cannot be used without a configured API token.
+
+### Grafana webhook HMAC
+
+Configure the same secret in Grafana and `VIGILIA_GRAFANA_WEBHOOK_HMAC_SECRET`. In the Grafana Webhook contact point, enable **HMAC Signature** and configure:
+
+| Grafana option | Value |
+| --- | --- |
+| Secret | The value of `VIGILIA_GRAFANA_WEBHOOK_HMAC_SECRET`. |
+| Header | `X-Grafana-Alerting-Signature` (Grafana default). |
+| Timestamp Header | `X-Grafana-Alerting-Timestamp`. |
+
+Grafana signs the raw request body with HMAC-SHA256 over `timestamp + ":" + body`. Vigilia rejects missing or invalid signatures and timestamps older than `VIGILIA_GRAFANA_WEBHOOK_MAX_AGE_SECONDS`.
+
+The sample sender reads `VIGILIA_GRAFANA_WEBHOOK_HMAC_SECRET` and signs requests automatically. You can also provide it explicitly with `--hmac-secret`.
+
+### Incident API Bearer token
+
+Set a strong `VIGILIA_API_TOKEN` and send it with every `/incidents` request:
+
+```bash
+curl http://localhost:8000/incidents \
+  -H "Authorization: Bearer $VIGILIA_API_TOKEN"
+```
+
+`/health` remains public so it can be used by infrastructure health checks.
+
 ## API
 
 Interactive API documentation is available at `/docs` while the API is running.
 
-| Method | Endpoint | Purpose |
-| --- | --- | --- |
-| `GET` | `/health` | Service health and environment label. |
-| `POST` | `/webhooks/grafana` | Receives a Grafana Alerting webhook payload. |
-| `GET` | `/incidents` | Lists incident summaries. |
-| `GET` | `/incidents/{incident_id}` | Retrieves an incident and its associated alert timeline. |
-| `POST` | `/incidents/{incident_id}/report` | Generates, validates, and stores an LLM incident report. |
-| `GET` | `/incidents/{incident_id}/reports` | Lists reports previously generated for an incident. |
+| Method | Endpoint | Authentication | Purpose |
+| --- | --- | --- | --- |
+| `GET` | `/health` | Public | Service health and environment label. |
+| `POST` | `/webhooks/grafana` | Grafana HMAC | Receives a Grafana Alerting webhook payload. |
+| `GET` | `/incidents` | Bearer token | Lists incident summaries. |
+| `GET` | `/incidents/{incident_id}` | Bearer token | Retrieves an incident and its associated alert timeline. |
+| `POST` | `/incidents/{incident_id}/report` | Bearer token | Generates, validates, and stores an LLM incident report. |
+| `GET` | `/incidents/{incident_id}/reports` | Bearer token | Lists reports previously generated for an incident. |
 
 ## Send a sample alert
 

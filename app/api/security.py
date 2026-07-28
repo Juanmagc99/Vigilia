@@ -70,3 +70,34 @@ async def verify_grafana_signature(
         raise AuthenticationAppError(
             code="invalid_grafana_signature",
         )
+
+async def verify_api_token(
+    authorization: Annotated[str | None, Header()] = None
+) -> None:
+
+    conf_token = settings.api_token
+
+    if conf_token is None:
+        raise SecurityConfigurationAppError(
+            code="api_security_not_configured"
+        )
+
+    if authorization is None:
+        raise AuthenticationAppError(
+            code="missing_api_token"
+        )
+
+    scheme, _, token = authorization.partition(" ")
+
+    if scheme.lower() != "bearer" or not token:
+        raise AuthenticationAppError(
+            code="invalid_api_token",
+        )
+
+    if not hmac.compare_digest(
+        conf_token.get_secret_value(),
+        token,
+    ):
+        raise AuthenticationAppError(
+            code="invalid_api_token",
+        )

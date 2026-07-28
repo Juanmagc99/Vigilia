@@ -3,6 +3,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request
 
+from app.api.security import verify_api_token
 from app.core.errors import InternalAppError
 from app.db.session import DatabaseSession
 from app.schemas.errors import ErrorResponse
@@ -16,7 +17,11 @@ from app.services.report_generation_service import ReportGenerationService
 from app.services.report_service import list_reports_for_incident
 
 
-router = APIRouter(prefix="/incidents", tags=["incidents"])
+router = APIRouter(
+    prefix="/incidents",
+    tags=["incidents"],
+    dependencies=[Depends(verify_api_token)],
+)
 
 
 def get_report_generation_service(request: Request) -> ReportGenerationService:
