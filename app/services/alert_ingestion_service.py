@@ -40,9 +40,6 @@ def ingest_grafana_payload(
         saved_alerts = save_alerts(session, alerts)
         session.commit()
 
-        for alert in saved_alerts:
-            session.refresh(alert)
-
         logger.info(
             "Persisted alerts operation=ingest_grafana_payload entity=alert count=%s",
             len(saved_alerts),
@@ -58,8 +55,7 @@ def ingest_grafana_payload(
             },
         ) from exc
 
-    for alert in saved_alerts:
-        publisher.publish_alert_received(alert)
+    publisher.publish_alerts_received(saved_alerts)
 
     return AlertIngestionResult(
         alerts_received=len(payload.alerts),

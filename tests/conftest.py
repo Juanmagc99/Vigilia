@@ -212,8 +212,8 @@ class FakeAlertEventPublisher:
     def __init__(self) -> None:
         self.published_alerts: list[Alert] = []
 
-    def publish_alert_received(self, alert: Alert) -> None:
-        self.published_alerts.append(alert)
+    def publish_alerts_received(self, alerts: list[Alert]) -> None:
+        self.published_alerts.extend(alerts)
 
 
 @pytest.fixture

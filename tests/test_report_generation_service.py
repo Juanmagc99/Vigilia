@@ -3,10 +3,16 @@ from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 import pytest
+from anyio import CapacityLimiter
 
 from app.core.errors import LLMProviderAppError, NotFoundAppError
 from app.schemas.reports import ReportRead
 from app.services.report_generation_service import ReportGenerationService
+
+
+@pytest.fixture
+def llm_limiter() -> CapacityLimiter:
+    return CapacityLimiter(1)
 
 
 def test_generate_valid_report_persists_validated_content(
@@ -16,6 +22,7 @@ def test_generate_valid_report_persists_validated_content(
     valid_report_json,
     fake_prompt_renderer,
     llm_client_factory,
+    llm_limiter,
 ) -> None:
     llm_client = llm_client_factory(valid_report_json)
     persisted: dict[str, object] = {}
@@ -54,6 +61,7 @@ def test_generate_valid_report_persists_validated_content(
     service = ReportGenerationService(
         prompt_renderer=fake_prompt_renderer,
         llm_client=llm_client,
+        llm_limiter=llm_limiter,
     )
 
     report = asyncio.run(service.generate(incident_id=incident_id))
@@ -74,6 +82,7 @@ def test_generate_rejects_invalid_llm_report(
     incident_detail,
     fake_prompt_renderer,
     llm_client_factory,
+    llm_limiter,
 ) -> None:
     llm_client = llm_client_factory('{"summary": "Incomplete report"}')
 
@@ -95,6 +104,7 @@ def test_generate_rejects_invalid_llm_report(
     service = ReportGenerationService(
         prompt_renderer=fake_prompt_renderer,
         llm_client=llm_client,
+        llm_limiter=llm_limiter,
     )
 
     with pytest.raises(LLMProviderAppError) as exc_info:
@@ -113,6 +123,7 @@ def test_generate_stops_when_incident_does_not_exist(
     fake_prompt_renderer,
     valid_report_json,
     llm_client_factory,
+    llm_limiter,
 ) -> None:
     llm_client = llm_client_factory(valid_report_json)
 
@@ -131,6 +142,7 @@ def test_generate_stops_when_incident_does_not_exist(
     service = ReportGenerationService(
         prompt_renderer=fake_prompt_renderer,
         llm_client=llm_client,
+        llm_limiter=llm_limiter,
     )
 
     with pytest.raises(NotFoundAppError):

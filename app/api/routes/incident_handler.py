@@ -112,6 +112,10 @@ def get_incident(
     "/{incident_id}/report",
     response_model=ReportRead,
     responses={
+        409: {
+            "model": ErrorResponse,
+            "description": "A report is already being generated for the incident",
+        },
         404: {
             "model": ErrorResponse,
             "description": "Incident not found",

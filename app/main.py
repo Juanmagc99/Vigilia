@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+from anyio import CapacityLimiter
 from fastapi import FastAPI
 
 from app.api.exception_handlers import register_exception_handlers
@@ -26,9 +27,12 @@ async def lifespan(app: FastAPI):
             api_key=settings.llm_api_key.get_secret_value(),
             timeout_seconds=settings.llm_timeout_seconds,
         )
+
+        llm_limiter = CapacityLimiter(settings.llm_max_concurrency)
         app.state.report_generation_service = ReportGenerationService(
             prompt_renderer=prompt_renderer,
             llm_client=llm_client,
+            llm_limiter=llm_limiter,
         )
     else:
         app.state.report_generation_service = None

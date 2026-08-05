@@ -19,7 +19,7 @@ jobs:
   pytest:
     name: Pytest (Python 3.13)
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
 
     steps:
       - name: Check out repository

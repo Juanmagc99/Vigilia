@@ -14,11 +14,11 @@ logger = get_logger(__name__)
 
 
 class AlertEventPublisher(Protocol):
-    def publish_alert_received(self, alert: Alert) -> None:
+    def publish_alerts_received(self, alerts: list[Alert]) -> None:
         ...
     
 class NoopAlertEventPublisher:
-    def publish_alert_received(self, alert: Alert) -> None:
+    def publish_alerts_received(self, alerts: list[Alert]) -> None:
         return None
 
 
@@ -27,32 +27,53 @@ class KafkaAlertEventPublisher:
         self.producer = producer
         self.topic = topic
 
-    def publish_alert_received(self, alert: Alert) -> None:
-        message = build_alert_received_message(alert)
+    def publish_alerts_received(self, alerts: list[Alert]) -> None:
+        delivery_errors: list[str] = []
+
+        def on_delivery(error, _message) -> None:
+            if error is not None:
+                delivery_errors.append(str(error))
 
         try:
-            self.producer.produce(
-                topic=self.topic,
-                key=alert.service,
-                value=message.model_dump_json(),
+            for alert in alerts:
+                message = build_alert_received_message(alert)
+                self.producer.produce(
+                    topic=self.topic,
+                    key=alert.service,
+                    value=message.model_dump_json(),
+                    on_delivery=on_delivery,
+                )
+
+            remaining = self.producer.flush(
+                timeout=settings.kafka_flush_timeout_seconds,
             )
-            self.producer.flush()
+
+            if remaining or delivery_errors:
+                raise ExternalServiceAppError(
+                    message="Could not deliver all alert events",
+                    metadata={
+                        "operation": "publish_alerts_received",
+                        "topic": self.topic,
+                        "alert_count": len(alerts),
+                        "remaining": remaining,
+                        "delivery_errors": delivery_errors,
+                    },
+                )
+
             logger.info(
-                "Published alert event topic=%s event_type=%s alert_id=%s service=%s",
+                "Published alert events topic=%s event_type=alert.received count=%s",
                 self.topic,
-                message.event_type,
-                message.alert_id,
-                message.service,
+                len(alerts),
             )
+        except ExternalServiceAppError:
+            raise
         except Exception as exc:
             raise ExternalServiceAppError(
-                message="Could not publish alert event",
+                message="Could not publish alert events",
                 metadata={
-                    "operation": "publish_alert_received",
+                    "operation": "publish_alerts_received",
                     "topic": self.topic,
-                    "event_type": message.event_type,
-                    "alert_id": str(message.alert_id),
-                    "service": message.service,
+                    "alert_count": len(alerts),
                 },
             ) from exc
 
@@ -73,6 +94,11 @@ def get_alert_event_publisher() -> AlertEventPublisher:
     producer = Producer(
         {
             "bootstrap.servers": settings.kafka_bootstrap_servers,
+            "acks": "all",
+            "enable.idempotence": True,
+            "delivery.timeout.ms": int(
+                settings.kafka_flush_timeout_seconds * 1000
+            ),
         }
     )
     return KafkaAlertEventPublisher(

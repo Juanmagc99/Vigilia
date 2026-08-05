@@ -14,6 +14,11 @@ class Settings(BaseSettings):
 
     kafka_bootstrap_servers: str = "localhost:9092"
     alerts_received_topic: str = "alerts.received"
+    kafka_flush_timeout_seconds: float = Field(
+        default=5.0,
+        gt=0,
+        le=60,
+    )
 
     incident_correlation_window_minutes: int = 45
 
@@ -27,6 +32,12 @@ class Settings(BaseSettings):
         default=300,
         gt=0,
         le=3600,
+    )
+
+    llm_max_concurrency: int = Field(
+    default=3,
+    ge=1,
+    le=100,
     )
 
     api_token: SecretStr | None = None

@@ -53,6 +53,7 @@ def test_grafana_webhook_accepts_real_notification_test_payload(
     assert fake_session.commit_called is True
     assert fake_session.rollback_called is False
     assert len(fake_session.added) == 1
+    assert fake_session.refreshed == []
     assert len(fake_alert_publisher.published_alerts) == 1
     assert fake_alert_publisher.published_alerts[0].fingerprint == (
         "57c6d9296de2ad39"
