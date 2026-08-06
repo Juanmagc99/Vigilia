@@ -79,7 +79,7 @@ Redpanda is used as a Kafka-compatible broker. In Vigilia, it is the event log b
 Current configuration:
 
 ```text
-bootstrap servers: localhost:9092
+bootstrap servers: localhost:19092
 main topic: alerts.received
 ```
 
@@ -530,7 +530,7 @@ MemoryHigh resolved  -> Incident becomes resolved
 Infrastructure:
 
 ```powershell
-docker compose up -d postgres redpanda grafana
+docker compose -f docker/docker-compose.dev.yaml up -d postgres redpanda grafana
 ```
 
 Migrations:

@@ -19,6 +19,18 @@ class Settings(BaseSettings):
         gt=0,
         le=60,
     )
+    outbox_batch_size: int = Field(default=100, ge=1, le=1000)
+    outbox_poll_interval_seconds: float = Field(
+        default=1.0,
+        gt=0,
+        le=60,
+    )
+    outbox_lock_seconds: int = Field(default=60, ge=1, le=3600)
+    outbox_max_retry_delay_seconds: int = Field(
+        default=300,
+        ge=1,
+        le=86400,
+    )
 
     incident_correlation_window_minutes: int = 45
 

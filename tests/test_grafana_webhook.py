@@ -3,25 +3,20 @@ import copy
 import pytest
 
 from app.core.config import settings
+from app.db.models.outbox_event import OutboxEvent
 from app.db.session import get_session
-from app.events.publisher import get_alert_event_publisher
 from app.main import app
 
 
 @pytest.fixture
 def grafana_endpoint_dependencies(
     fake_session,
-    fake_alert_publisher,
 ) -> tuple:
     def fake_get_session():
         yield fake_session
 
     app.dependency_overrides[get_session] = fake_get_session
-    app.dependency_overrides[get_alert_event_publisher] = (
-        lambda: fake_alert_publisher
-    )
-
-    return fake_session, fake_alert_publisher
+    return (fake_session,)
 
 
 def test_grafana_webhook_accepts_real_notification_test_payload(
@@ -31,7 +26,7 @@ def test_grafana_webhook_accepts_real_notification_test_payload(
     signed_grafana_request,
     grafana_endpoint_dependencies,
 ) -> None:
-    fake_session, fake_alert_publisher = grafana_endpoint_dependencies
+    (fake_session,) = grafana_endpoint_dependencies
     body, headers = signed_grafana_request(grafana_payload)
 
     response = client.post(
@@ -40,24 +35,22 @@ def test_grafana_webhook_accepts_real_notification_test_payload(
         headers=headers,
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 202
     assert response.json() == {
         "status": "accepted",
         "source": "grafana",
         "alerts_received": 1,
         "alerts_normalized": 1,
         "alerts_persisted": 1,
-        "events_published": 1,
+        "events_queued": 1,
         "group_key": "webhook-57c6d9296de2ad39-1782063307",
     }
     assert fake_session.commit_called is True
     assert fake_session.rollback_called is False
-    assert len(fake_session.added) == 1
     assert fake_session.refreshed == []
-    assert len(fake_alert_publisher.published_alerts) == 1
-    assert fake_alert_publisher.published_alerts[0].fingerprint == (
-        "57c6d9296de2ad39"
-    )
+    assert len(fake_session.added) == 2
+    assert isinstance(fake_session.added[1], OutboxEvent)
+    assert fake_session.added[1].topic == settings.alerts_received_topic
 
 
 @pytest.mark.parametrize(
@@ -75,7 +68,7 @@ def test_grafana_webhook_rejects_missing_signature_headers(
     grafana_endpoint_dependencies,
     missing_header,
 ) -> None:
-    fake_session, fake_alert_publisher = grafana_endpoint_dependencies
+    (fake_session,) = grafana_endpoint_dependencies
     body, headers = signed_grafana_request(grafana_payload)
     headers.pop(missing_header)
 
@@ -89,7 +82,6 @@ def test_grafana_webhook_rejects_missing_signature_headers(
     assert response.json()["error"]["code"] == "missing_grafana_signature"
     assert fake_session.commit_called is False
     assert fake_session.added == []
-    assert fake_alert_publisher.published_alerts == []
 
 
 def test_grafana_webhook_rejects_invalid_signature(
@@ -99,7 +91,7 @@ def test_grafana_webhook_rejects_invalid_signature(
     signed_grafana_request,
     grafana_endpoint_dependencies,
 ) -> None:
-    fake_session, fake_alert_publisher = grafana_endpoint_dependencies
+    (fake_session,) = grafana_endpoint_dependencies
     body, headers = signed_grafana_request(grafana_payload)
     headers["X-Grafana-Alerting-Signature"] = "0" * 64
 
@@ -113,7 +105,6 @@ def test_grafana_webhook_rejects_invalid_signature(
     assert response.json()["error"]["code"] == "invalid_grafana_signature"
     assert fake_session.commit_called is False
     assert fake_session.added == []
-    assert fake_alert_publisher.published_alerts == []
 
 
 def test_grafana_webhook_rejects_expired_signature(
@@ -123,7 +114,7 @@ def test_grafana_webhook_rejects_expired_signature(
     signed_grafana_request,
     grafana_endpoint_dependencies,
 ) -> None:
-    fake_session, fake_alert_publisher = grafana_endpoint_dependencies
+    (fake_session,) = grafana_endpoint_dependencies
     body, headers = signed_grafana_request(
         grafana_payload,
         timestamp="1749999699",
@@ -139,7 +130,6 @@ def test_grafana_webhook_rejects_expired_signature(
     assert response.json()["error"]["code"] == "expired_grafana_signature"
     assert fake_session.commit_called is False
     assert fake_session.added == []
-    assert fake_alert_publisher.published_alerts == []
 
 
 def test_grafana_webhook_rejects_body_altered_after_signing(
@@ -149,7 +139,7 @@ def test_grafana_webhook_rejects_body_altered_after_signing(
     signed_grafana_request,
     grafana_endpoint_dependencies,
 ) -> None:
-    fake_session, fake_alert_publisher = grafana_endpoint_dependencies
+    (fake_session,) = grafana_endpoint_dependencies
     original_body, _ = signed_grafana_request(grafana_payload)
     altered_payload = copy.deepcopy(grafana_payload)
     altered_payload["status"] = "resolved"
@@ -168,7 +158,6 @@ def test_grafana_webhook_rejects_body_altered_after_signing(
     assert response.json()["error"]["code"] == "invalid_grafana_signature"
     assert fake_session.commit_called is False
     assert fake_session.added == []
-    assert fake_alert_publisher.published_alerts == []
 
 
 def test_grafana_webhook_returns_503_when_security_is_not_configured(

@@ -12,6 +12,7 @@ from app.core.config import settings
 from app.db.models.alert import Alert
 from app.db.models.incident import Incident
 from app.db.models.incident_alert import IncidentAlert
+from app.db.models.outbox_event import OutboxEvent
 from app.db.models.report import Report
 
 # this is the Alembic Config object, which provides

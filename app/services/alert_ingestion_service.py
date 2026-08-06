@@ -6,8 +6,9 @@ from sqlmodel import Session
 from app.core.errors import DatabaseAppError
 from app.core.logging import get_logger
 from app.db.models.alert import Alert
-from app.events.publisher import AlertEventPublisher
+from app.core.config import settings
 from app.repositories.alert_repository import save_alerts
+from app.repositories.outbox_repository import save_alert_received_events
 from app.schemas.alerts import NormalizedAlert
 from app.schemas.grafana import GrafanaWebhookPayload
 from app.services.grafana_normalizer import normalize_grafana_payload
@@ -21,14 +22,13 @@ class AlertIngestionResult:
     alerts_received: int
     alerts_normalized: int
     alerts_persisted: int
-    events_published: int
+    events_queued: int
     saved_alerts: list[Alert]
 
 
 def ingest_grafana_payload(
     payload: GrafanaWebhookPayload,
     session: Session,
-    publisher: AlertEventPublisher,
 ) -> AlertIngestionResult:
     normalized_alerts = normalize_grafana_payload(payload)
     alerts = [
@@ -38,6 +38,11 @@ def ingest_grafana_payload(
 
     try:
         saved_alerts = save_alerts(session, alerts)
+        outbox_events = save_alert_received_events(
+            session,
+            saved_alerts,
+            topic=settings.alerts_received_topic,
+        )
         session.commit()
 
         logger.info(
@@ -55,13 +60,11 @@ def ingest_grafana_payload(
             },
         ) from exc
 
-    publisher.publish_alerts_received(saved_alerts)
-
     return AlertIngestionResult(
         alerts_received=len(payload.alerts),
         alerts_normalized=len(normalized_alerts),
         alerts_persisted=len(saved_alerts),
-        events_published=len(saved_alerts),
+        events_queued=len(outbox_events),
         saved_alerts=saved_alerts,
     )
 

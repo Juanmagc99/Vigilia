@@ -9,8 +9,8 @@ Grafana remains responsible for evaluating alert rules. Vigilia provides the ope
 ```text
 Grafana Alerting
   -> POST /webhooks/grafana
-  -> normalize and persist Alert in PostgreSQL
-  -> publish alerts.received to Redpanda (Kafka-compatible)
+  -> normalize and persist Alert plus outbox event in PostgreSQL
+  -> outbox publisher publishes alerts.received to Redpanda (Kafka-compatible)
   -> consumer correlates the Alert into an Incident
   -> optional LLM report generation for the Incident
 ```
@@ -26,9 +26,10 @@ An **alert** is one incoming event. An **incident** is a group of related alerts
 
 | Component | Responsibility |
 | --- | --- |
-| FastAPI API | Receives Grafana webhooks, exposes health and incident endpoints, and generates reports on demand. |
+| FastAPI API | Receives Grafana webhooks, persists alerts and outbox events, exposes health and incident endpoints, and generates reports on demand. |
 | PostgreSQL | Stores alerts, incidents, alert-to-incident links, and generated reports. |
 | Redpanda | Kafka-compatible event broker between ingestion and background processing. |
+| Outbox publisher | Publishes pending durable events from PostgreSQL to Redpanda, with retries. |
 | Consumer | Reads `alerts.received` and applies incident-correlation rules. |
 | LiteLLM | Calls the configured LLM provider to produce validated JSON incident reports. |
 | Grafana | Optional local Grafana instance for alerting integration and exploration. |
@@ -53,8 +54,8 @@ Edit `.env`. Database and Redpanda defaults work for local development. To enabl
 ### 2. Start infrastructure and apply migrations
 
 ```bash
-docker compose up -d postgres redpanda
-docker compose --profile tools run --rm migrate
+docker compose -f docker/docker-compose.yaml up -d postgres redpanda
+docker compose -f docker/docker-compose.yaml --profile tools run --rm migrate
 ```
 
 The migration service is a one-off container. It uses the same application image as the API but runs `alembic upgrade head` and exits.
@@ -62,7 +63,7 @@ The migration service is a one-off container. It uses the same application image
 ### 3. Start the application services
 
 ```bash
-docker compose up -d --build api consumer grafana
+docker compose -f docker/docker-compose.yaml up -d --build api outbox-publisher consumer grafana
 ```
 
 The services are then available at:
@@ -78,40 +79,53 @@ The services are then available at:
 View service logs when debugging:
 
 ```bash
-docker compose logs -f api consumer
+docker compose -f docker/docker-compose.yaml logs -f api outbox-publisher consumer
 ```
 
 To stop the stack while retaining database data:
 
 ```bash
-docker compose down
+docker compose -f docker/docker-compose.yaml down
 ```
 
 ## Local development
 
 This project targets Python 3.13. Install dependencies with your preferred environment manager (the repository includes `pyproject.toml` and `uv.lock`).
 
-Start the dependencies with Docker:
+The development Compose file runs PostgreSQL, Redpanda, Grafana, the consumer,
+and the outbox publisher. The API itself runs on the host with hot reload:
 
 ```bash
-docker compose up -d postgres redpanda
+docker compose -f docker/docker-compose.dev.yaml up -d
 ```
 
-Then, from a local Python environment:
+The first run builds the `vigilia:dev` image used by the background workers.
+Application source is bind-mounted into those containers, so later Python code
+changes do not require rebuilding it. Restart a worker after changing its code:
+
+```bash
+docker compose -f docker/docker-compose.dev.yaml restart consumer outbox-publisher
+```
+
+The development stack applies pending Alembic migrations automatically before
+starting the workers. Install dependencies and start the API from a local Python
+environment:
 
 ```bash
 uv sync
-uv run alembic upgrade head
 uv run uvicorn app.main:app --reload
 ```
 
-In a separate terminal, run the event consumer:
+In local mode the `.env` values should use `localhost` for PostgreSQL and
+`localhost:19092` for Redpanda. Docker Compose overrides those connection values
+with the internal service names `postgres` and `redpanda` for containerized
+workers.
+
+Stop the development services while retaining their data with:
 
 ```bash
-uv run python -m app.events.consumer
+docker compose -f docker/docker-compose.dev.yaml down
 ```
-
-In local mode the `.env` values should use `localhost` for PostgreSQL and Redpanda. In Docker Compose, the API and consumer override those connection values with the internal service names `postgres` and `redpanda`.
 
 ## Configuration
 
@@ -125,8 +139,13 @@ Configuration is read through Pydantic settings. Every setting uses the `VIGILIA
 | `VIGILIA_DB_NAME` | `vigilia` | No | PostgreSQL database name. |
 | `VIGILIA_DB_USER` | `vigilia` | No | PostgreSQL user. |
 | `VIGILIA_DB_PASSWORD` | `vigilia` | No | PostgreSQL password. Use a secure value outside local development. |
-| `VIGILIA_KAFKA_BOOTSTRAP_SERVERS` | `localhost:9092` | No | Redpanda/Kafka bootstrap server. Compose uses `redpanda:9092` internally. |
+| `VIGILIA_KAFKA_BOOTSTRAP_SERVERS` | `localhost:19092` | No | Redpanda/Kafka bootstrap server from the host. Compose uses `redpanda:9092` internally. |
 | `VIGILIA_ALERTS_RECEIVED_TOPIC` | `alerts.received` | No | Kafka topic for persisted alert events. |
+| `VIGILIA_KAFKA_FLUSH_TIMEOUT_SECONDS` | `5` | No | Maximum wait for Kafka delivery of an outbox batch. |
+| `VIGILIA_OUTBOX_BATCH_SIZE` | `100` | No | Maximum number of pending events published in one batch. |
+| `VIGILIA_OUTBOX_POLL_INTERVAL_SECONDS` | `1` | No | Wait before checking the outbox again when there is no work. |
+| `VIGILIA_OUTBOX_LOCK_SECONDS` | `60` | No | Lease duration for events claimed by an outbox publisher. |
+| `VIGILIA_OUTBOX_MAX_RETRY_DELAY_SECONDS` | `300` | No | Upper bound for exponential retry delay after a Kafka failure. |
 | `VIGILIA_INCIDENT_CORRELATION_WINDOW_MINUTES` | `45` | No | How long a recent open incident remains eligible for service-based grouping. |
 | `VIGILIA_LLM_API_KEY` | — | For reports | API key passed to LiteLLM. Keep it out of version control. |
 | `VIGILIA_LLM_MODEL` | — | For reports | LiteLLM model identifier, such as `openai/gpt-4o-mini`. |
@@ -199,7 +218,7 @@ For an incident with multiple alerts, send firing alerts for the same `--service
 
 ## Docker networking note
 
-The Compose services use Docker DNS to reach each other: the API and consumer connect to `postgres:5432` and `redpanda:9092`. Your browser and local tools run on the host, so they use published host ports such as `localhost:8000` and `localhost:19092`.
+The Compose services use Docker DNS to reach each other: the API, outbox publisher and consumer connect to `postgres:5432` and `redpanda:9092`. Your browser and local tools run on the host, so they use published host ports such as `localhost:8000` and `localhost:19092`.
 
 Redpanda listens on `0.0.0.0` inside its container so Docker can route incoming traffic. It advertises `redpanda:9092` to containers and `localhost:19092` to clients running on your computer.
 
@@ -207,13 +226,17 @@ Redpanda listens on `0.0.0.0` inside its container so Docker can route incoming 
 
 ```bash
 # Check migration state
-docker compose --profile tools run --rm migrate alembic current
+docker compose -f docker/docker-compose.dev.yaml run --rm migrate alembic current
 
 # Follow a single service
-docker compose logs -f consumer
+docker compose -f docker/docker-compose.dev.yaml logs -f consumer
 
-# Rebuild and restart the API
-docker compose up -d --build api
+# Force a clean rebuild of the full-stack API image
+docker compose -f docker/docker-compose.yaml build --no-cache api
+docker compose -f docker/docker-compose.yaml up -d --force-recreate api
+
+# Rebuild using Docker's cache and restart the API
+docker compose -f docker/docker-compose.yaml up -d --build api
 
 # Run the test suite locally
 uv run pytest

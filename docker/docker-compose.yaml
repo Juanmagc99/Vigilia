@@ -47,10 +47,10 @@ services:
   api:
     image: vigilia:local
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: docker/Dockerfile
     env_file:
-      - .env
+      - ../.env
     environment:
       VIGILIA_ENVIRONMENT: docker
       VIGILIA_DB_HOST: postgres
@@ -77,11 +77,34 @@ services:
   consumer:
     image: vigilia:local
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: docker/Dockerfile
     command: ["python", "-m", "app.events.consumer"]
     env_file:
-      - .env
+      - ../.env
+    environment:
+      VIGILIA_ENVIRONMENT: docker
+      VIGILIA_DB_HOST: postgres
+      VIGILIA_DB_PORT: 5432
+      VIGILIA_DB_NAME: vigilia
+      VIGILIA_DB_USER: vigilia
+      VIGILIA_DB_PASSWORD: vigilia
+      VIGILIA_KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+    restart: unless-stopped
+
+  outbox-publisher:
+    image: vigilia:local
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    command: ["python", "-m", "app.events.outbox_publisher"]
+    env_file:
+      - ../.env
     environment:
       VIGILIA_ENVIRONMENT: docker
       VIGILIA_DB_HOST: postgres
@@ -100,11 +123,11 @@ services:
   migrate:
     image: vigilia:local
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: docker/Dockerfile
     command: ["alembic", "upgrade", "head"]
     env_file:
-      - .env
+      - ../.env
     environment:
       VIGILIA_DB_HOST: postgres
       VIGILIA_DB_PORT: 5432

@@ -207,15 +207,3 @@ class FakeSession:
 def fake_session() -> FakeSession:
     return FakeSession()
 
-
-class FakeAlertEventPublisher:
-    def __init__(self) -> None:
-        self.published_alerts: list[Alert] = []
-
-    def publish_alerts_received(self, alerts: list[Alert]) -> None:
-        self.published_alerts.extend(alerts)
-
-
-@pytest.fixture
-def fake_alert_publisher() -> FakeAlertEventPublisher:
-    return FakeAlertEventPublisher()
