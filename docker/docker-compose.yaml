@@ -74,12 +74,12 @@ services:
       retries: 3
     restart: unless-stopped
 
-  consumer:
+  worker:
     image: vigilia:local
     build:
       context: ..
       dockerfile: docker/Dockerfile
-    command: ["python", "-m", "app.events.consumer"]
+    command: ["python", "-m", "vigilia.worker"]
     env_file:
       - ../.env
     environment:
@@ -102,7 +102,7 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile
-    command: ["python", "-m", "app.events.outbox_publisher"]
+    command: ["python", "-m", "vigilia.publisher"]
     env_file:
       - ../.env
     environment:

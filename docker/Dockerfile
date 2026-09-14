@@ -38,12 +38,14 @@ COPY --from=builder \
     /app/.venv \
     /app/.venv
 
-COPY --chown=vigilia:vigilia app ./app
+COPY --chown=vigilia:vigilia src ./src
 COPY --chown=vigilia:vigilia migrations ./migrations
 COPY --chown=vigilia:vigilia alembic.ini ./
+
+ENV PYTHONPATH="/app/src"
 
 USER vigilia
 
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "vigilia.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]

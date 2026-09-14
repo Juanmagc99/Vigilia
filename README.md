@@ -1,243 +1,130 @@
 # Vigilia
 
-Vigilia is an incident-intelligence backend for Grafana Alerting. It receives Grafana webhooks, turns raw alerts into normalized records, stores them, and groups related alerts into operational incidents. It can also generate and retain a structured, LLM-powered report for an incident.
-
-Grafana remains responsible for evaluating alert rules. Vigilia provides the operational layer after an alert is raised: persistence, event processing, correlation, incident inspection, and report generation.
-
-## What happens to an alert?
-
-```text
-Grafana Alerting
-  -> POST /webhooks/grafana
-  -> normalize and persist Alert plus outbox event in PostgreSQL
-  -> outbox publisher publishes alerts.received to Redpanda (Kafka-compatible)
-  -> consumer correlates the Alert into an Incident
-  -> optional LLM report generation for the Incident
-```
-
-An **alert** is one incoming event. An **incident** is a group of related alerts.
-
-- Firing alerts are grouped by service within a configurable time window.
-- Resolved alerts are matched to the original alert by Grafana fingerprint.
-- An incident resolves only after the latest event for every associated fingerprint is `resolved`.
-- Incident severity keeps the highest severity observed: `critical > warning > info > unknown`.
+Vigilia is a backend for receiving operational alerts, correlating them into incidents, and running durable incident investigations. Investigations can use the deterministic simulator or a provider-agnostic LLM adapter through LiteLLM. Operational knowledge retrieval (RAG) is the next phase.
 
 ## Architecture
 
-| Component | Responsibility |
-| --- | --- |
-| FastAPI API | Receives Grafana webhooks, persists alerts and outbox events, exposes health and incident endpoints, and generates reports on demand. |
-| PostgreSQL | Stores alerts, incidents, alert-to-incident links, and generated reports. |
-| Redpanda | Kafka-compatible event broker between ingestion and background processing. |
-| Outbox publisher | Publishes pending durable events from PostgreSQL to Redpanda, with retries. |
-| Consumer | Reads `alerts.received` and applies incident-correlation rules. |
-| LiteLLM | Calls the configured LLM provider to produce validated JSON incident reports. |
-| Grafana | Optional local Grafana instance for alerting integration and exploration. |
+The Python package lives under `src/vigilia` and follows this dependency direction:
 
-## Quick start with Docker Compose
+```text
+HTTP / Grafana / PostgreSQL / Redpanda adapters
+                       |
+                       v
+              application use cases
+                       |
+                       v
+                 domain rules
 
-### Prerequisites
+bootstrap composes the implementations for each process
+```
 
-- Docker with Docker Compose
-- An LLM API key and model only if you want to generate incident reports
+The runtime consists of three application processes:
 
-### 1. Create your environment file
+- `vigilia.main`: FastAPI ingestion, commands, and queries.
+- `vigilia.publisher`: reliable PostgreSQL outbox publisher.
+- `vigilia.worker`: alert correlation and investigation handlers.
 
-Shell:
+PostgreSQL owns business state and the outbox. Redpanda provides at-least-once delivery. Events are deduplicated by consumer and event ID in the same transaction as their business effect.
+
+## Current flows
+
+```text
+Grafana -> API -> alerts + outbox -> publisher -> Redpanda
+        -> worker -> incident + revision
+
+Client -> POST investigation -> investigation + outbox -> publisher
+       -> worker -> lease + attempt -> configured analyzer -> durable result
+       -> GET investigation
+```
+
+The simulator performs no external calls and does not infer a probable cause. The LiteLLM analyzer requests a structured `incident_investigation.v1` result, rejects unknown evidence references, and records provider, model, token usage, estimated cost, response ID, and latency for every successful attempt. Incidents without enough evidence can produce `insufficient_evidence` as a valid completed result.
+
+## Local setup
+
+Requirements:
+
+- Python 3.13
+- uv
+- Docker with Compose
+
+Create the local configuration:
 
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env`. Database and Redpanda defaults work for local development. To enable report generation, replace the LLM placeholders with valid provider credentials and a LiteLLM model identifier, for example `openai/gpt-4o-mini`.
+Set distinct values for `VIGILIA_GRAFANA_WEBHOOK_HMAC_SECRET` and `VIGILIA_API_TOKEN`.
 
-### 2. Start infrastructure and apply migrations
-
-```bash
-docker compose -f docker/docker-compose.yaml up -d postgres redpanda
-docker compose -f docker/docker-compose.yaml --profile tools run --rm migrate
-```
-
-The migration service is a one-off container. It uses the same application image as the API but runs `alembic upgrade head` and exits.
-
-### 3. Start the application services
-
-```bash
-docker compose -f docker/docker-compose.yaml up -d --build api outbox-publisher consumer grafana
-```
-
-The services are then available at:
-
-| Service | Address |
-| --- | --- |
-| API and OpenAPI UI | http://localhost:8000/docs |
-| API health check | http://localhost:8000/health |
-| Grafana | http://localhost:3000 (`admin` / `admin`) |
-| PostgreSQL from your host | `localhost:5432` |
-| Redpanda Kafka listener from your host | `localhost:19092` |
-
-View service logs when debugging:
-
-```bash
-docker compose -f docker/docker-compose.yaml logs -f api outbox-publisher consumer
-```
-
-To stop the stack while retaining database data:
-
-```bash
-docker compose -f docker/docker-compose.yaml down
-```
-
-## Local development
-
-This project targets Python 3.13. Install dependencies with your preferred environment manager (the repository includes `pyproject.toml` and `uv.lock`).
-
-The development Compose file runs PostgreSQL, Redpanda, Grafana, the consumer,
-and the outbox publisher. The API itself runs on the host with hot reload:
-
-```bash
-docker compose -f docker/docker-compose.dev.yaml up -d
-```
-
-The first run builds the `vigilia:dev` image used by the background workers.
-Application source is bind-mounted into those containers, so later Python code
-changes do not require rebuilding it. Restart a worker after changing its code:
-
-```bash
-docker compose -f docker/docker-compose.dev.yaml restart consumer outbox-publisher
-```
-
-The development stack applies pending Alembic migrations automatically before
-starting the workers. Install dependencies and start the API from a local Python
-environment:
+Install the package and start infrastructure:
 
 ```bash
 uv sync
-uv run uvicorn app.main:app --reload
+docker compose -f docker/docker-compose.dev.yaml up --build
 ```
 
-In local mode the `.env` values should use `localhost` for PostgreSQL and
-`localhost:19092` for Redpanda. Docker Compose overrides those connection values
-with the internal service names `postgres` and `redpanda` for containerized
-workers.
+The development stack applies Alembic migrations before starting the API and workers. Existing alerts, incidents, outbox events, and reports are retained. Historical reports are copied into completed investigations while the original table remains read-only.
 
-Stop the development services while retaining their data with:
+For host execution against containerized PostgreSQL and Redpanda:
 
 ```bash
-docker compose -f docker/docker-compose.dev.yaml down
+uv run alembic upgrade head
+uv run uvicorn vigilia.main:create_app --factory --reload
+uv run vigilia-worker
+uv run vigilia-publisher
 ```
 
 ## Configuration
 
-Configuration is read through Pydantic settings. Every setting uses the `VIGILIA_` prefix. The application reads `.env` in local execution; Docker Compose injects that file into the containers through `env_file`.
+All configuration uses the `VIGILIA_` prefix. Important settings are documented in `.env.example`.
 
-| Variable | Default | Required | Description |
-| --- | --- | --- | --- |
-| `VIGILIA_ENVIRONMENT` | `local` | No | Environment label returned by `/health`. Compose sets it to `docker` for the API and consumer. |
-| `VIGILIA_DB_HOST` | `localhost` | No | PostgreSQL hostname. Use `localhost` locally; Compose uses `postgres` internally. |
-| `VIGILIA_DB_PORT` | `5432` | No | PostgreSQL port. |
-| `VIGILIA_DB_NAME` | `vigilia` | No | PostgreSQL database name. |
-| `VIGILIA_DB_USER` | `vigilia` | No | PostgreSQL user. |
-| `VIGILIA_DB_PASSWORD` | `vigilia` | No | PostgreSQL password. Use a secure value outside local development. |
-| `VIGILIA_KAFKA_BOOTSTRAP_SERVERS` | `localhost:19092` | No | Redpanda/Kafka bootstrap server from the host. Compose uses `redpanda:9092` internally. |
-| `VIGILIA_ALERTS_RECEIVED_TOPIC` | `alerts.received` | No | Kafka topic for persisted alert events. |
-| `VIGILIA_KAFKA_FLUSH_TIMEOUT_SECONDS` | `5` | No | Maximum wait for Kafka delivery of an outbox batch. |
-| `VIGILIA_OUTBOX_BATCH_SIZE` | `100` | No | Maximum number of pending events published in one batch. |
-| `VIGILIA_OUTBOX_POLL_INTERVAL_SECONDS` | `1` | No | Wait before checking the outbox again when there is no work. |
-| `VIGILIA_OUTBOX_LOCK_SECONDS` | `60` | No | Lease duration for events claimed by an outbox publisher. |
-| `VIGILIA_OUTBOX_MAX_RETRY_DELAY_SECONDS` | `300` | No | Upper bound for exponential retry delay after a Kafka failure. |
-| `VIGILIA_INCIDENT_CORRELATION_WINDOW_MINUTES` | `45` | No | How long a recent open incident remains eligible for service-based grouping. |
-| `VIGILIA_LLM_API_KEY` | — | For reports | API key passed to LiteLLM. Keep it out of version control. |
-| `VIGILIA_LLM_MODEL` | — | For reports | LiteLLM model identifier, such as `openai/gpt-4o-mini`. |
-| `VIGILIA_LLM_TIMEOUT_SECONDS` | `35` | No | Maximum LLM request duration in seconds. |
-| `VIGILIA_GRAFANA_WEBHOOK_HMAC_SECRET` | — | For Grafana webhooks | Shared secret used to verify the webhook HMAC-SHA256 signature. |
-| `VIGILIA_GRAFANA_WEBHOOK_MAX_AGE_SECONDS` | `300` | No | Maximum accepted age for a signed Grafana request. |
-| `VIGILIA_API_TOKEN` | — | For `/incidents` | Bearer token required by incident and report endpoints. |
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` | local PostgreSQL | Database connection |
+| `KAFKA_BOOTSTRAP_SERVERS` | `localhost:19092` | Redpanda connection |
+| `ALERTS_RECEIVED_TOPIC` | `alerts.received.v1` | Versioned alert events |
+| `LEGACY_ALERTS_RECEIVED_TOPIC` | `alerts.received` | Migration compatibility |
+| `INVESTIGATIONS_REQUESTED_TOPIC` | `investigations.requested.v1` | Investigation jobs |
+| `INVESTIGATION_MAX_ATTEMPTS` | `3` | Attempt limit |
+| `INVESTIGATION_LEASE_SECONDS` | `120` | Worker claim lifetime |
+| `INVESTIGATION_RETRY_MAX_DELAY_SECONDS` | `60` | Retry backoff cap |
+| `INVESTIGATION_ANALYZER` | `simulated` | Analyzer implementation: `simulated` or `litellm` |
+| `LLM_MODEL` | none | LiteLLM model identifier such as `provider/model` |
+| `LLM_API_KEY` | none | Optional generic credential passed to LiteLLM |
+| `LLM_API_BASE` | none | Optional compatible endpoint or local model base URL |
+| `LLM_TIMEOUT_SECONDS` | `45` | Provider call deadline |
+| `LLM_MAX_OUTPUT_TOKENS` | `1200` | Maximum generated tokens per attempt |
+| `LLM_MAX_ALERTS` | `50` | Maximum recent alerts sent to the model |
+| `GRAFANA_WEBHOOK_HMAC_SECRET` | none | Grafana request authentication |
+| `API_TOKEN` | none | Incident API Bearer authentication |
 
-`VIGILIA_LLM_API_KEY` and `VIGILIA_LLM_MODEL` are optional for alert ingestion and incident correlation. Both are required to enable `POST /incidents/{incident_id}/report`; otherwise that endpoint returns an `llm_not_configured` error.
-
-> Do not commit `.env`. It is intentionally ignored by Git. Commit safe defaults and documentation to `.env.example` instead.
-
-## Security
-
-Vigilia fails closed for protected routes: a Grafana webhook cannot be ingested without a configured HMAC secret, and incident routes cannot be used without a configured API token.
-
-### Grafana webhook HMAC
-
-Configure the same secret in Grafana and `VIGILIA_GRAFANA_WEBHOOK_HMAC_SECRET`. In the Grafana Webhook contact point, enable **HMAC Signature** and configure:
-
-| Grafana option | Value |
-| --- | --- |
-| Secret | The value of `VIGILIA_GRAFANA_WEBHOOK_HMAC_SECRET`. |
-| Header | `X-Grafana-Alerting-Signature` (Grafana default). |
-| Timestamp Header | `X-Grafana-Alerting-Timestamp`. |
-
-Grafana signs the raw request body with HMAC-SHA256 over `timestamp + ":" + body`. Vigilia rejects missing or invalid signatures and timestamps older than `VIGILIA_GRAFANA_WEBHOOK_MAX_AGE_SECONDS`.
-
-The sample sender reads `VIGILIA_GRAFANA_WEBHOOK_HMAC_SECRET` and signs requests automatically. You can also provide it explicitly with `--hmac-secret`.
-
-### Incident API Bearer token
-
-Set a strong `VIGILIA_API_TOKEN` and send it with every `/incidents` request:
-
-```bash
-curl http://localhost:8000/incidents \
-  -H "Authorization: Bearer $VIGILIA_API_TOKEN"
-```
-
-`/health` remains public so it can be used by infrastructure health checks.
+The default remains `simulated`, so local infrastructure and API flows do not consume model tokens. To enable a provider, set `VIGILIA_INVESTIGATION_ANALYZER=litellm` and `VIGILIA_LLM_MODEL`. Credentials may use the generic `VIGILIA_LLM_API_KEY` or provider-specific environment variables recognized by LiteLLM. Only the worker constructs and invokes the real analyzer; the HTTP API never receives an LLM client.
 
 ## API
 
-Interactive API documentation is available at `/docs` while the API is running.
-
 | Method | Endpoint | Authentication | Purpose |
 | --- | --- | --- | --- |
-| `GET` | `/health` | Public | Service health and environment label. |
-| `POST` | `/webhooks/grafana` | Grafana HMAC | Receives a Grafana Alerting webhook payload. |
-| `GET` | `/incidents` | Bearer token | Lists incident summaries. |
-| `GET` | `/incidents/{incident_id}` | Bearer token | Retrieves an incident and its associated alert timeline. |
-| `POST` | `/incidents/{incident_id}/report` | Bearer token | Generates, validates, and stores an LLM incident report. |
-| `GET` | `/incidents/{incident_id}/reports` | Bearer token | Lists reports previously generated for an incident. |
+| `GET` | `/health` | Public | Process liveness |
+| `GET` | `/ready` | Public | PostgreSQL readiness |
+| `POST` | `/webhooks/grafana` | Grafana HMAC | Ingest alerts and queue events |
+| `GET` | `/incidents` | Bearer | List incidents |
+| `GET` | `/incidents/{id}` | Bearer | Incident detail and alert timeline |
+| `POST` | `/incidents/{id}/investigations` | Bearer | Queue an investigation and return `202` |
+| `GET` | `/investigations/{id}` | Bearer | Investigation state and result |
+| `GET` | `/incidents/{id}/investigations` | Bearer | Investigation history |
+| `GET` | `/incidents/{id}/reports` | Bearer | Deprecated historical report view |
 
-## Send a sample alert
+`POST /incidents/{id}/investigations` accepts an optional `Idempotency-Key` header and returns the polling URL in `Location`. Only one investigation can be active for the same incident revision and analyzer version.
 
-The repository provides a small Grafana-webhook sender. With the API running locally, send a firing alert with:
+The previous blocking `POST /incidents/{id}/report` endpoint no longer exists.
 
-```bash
-uv run python scripts/send_grafana_alert.py --service payments-api --alert-name CpuHigh --status firing --severity warning
-```
+## Reliability model
 
-Then send its resolution using the same service and alert name (the script derives the same fingerprint):
+- Business writes and outbox events share one database transaction.
+- Outbox rows use expiring claims and exponential publication retry.
+- Consumers commit Kafka offsets only after a durable effect.
+- Event processing is idempotent through `processed_events`.
+- Investigation work is claimed with an expiring lease and attempt token.
+- A stale worker cannot overwrite a newer attempt.
+- Transient analysis failures are rescheduled through a delayed outbox event.
 
-```bash
-uv run python scripts/send_grafana_alert.py --service payments-api --alert-name CpuHigh --status resolved --severity warning
-```
-
-For an incident with multiple alerts, send firing alerts for the same `--service`, then resolve each one. The incident remains open until every alert fingerprint is resolved.
-
-## Docker networking note
-
-The Compose services use Docker DNS to reach each other: the API, outbox publisher and consumer connect to `postgres:5432` and `redpanda:9092`. Your browser and local tools run on the host, so they use published host ports such as `localhost:8000` and `localhost:19092`.
-
-Redpanda listens on `0.0.0.0` inside its container so Docker can route incoming traffic. It advertises `redpanda:9092` to containers and `localhost:19092` to clients running on your computer.
-
-## Useful commands
-
-```bash
-# Check migration state
-docker compose -f docker/docker-compose.dev.yaml run --rm migrate alembic current
-
-# Follow a single service
-docker compose -f docker/docker-compose.dev.yaml logs -f consumer
-
-# Force a clean rebuild of the full-stack API image
-docker compose -f docker/docker-compose.yaml build --no-cache api
-docker compose -f docker/docker-compose.yaml up -d --force-recreate api
-
-# Rebuild using Docker's cache and restart the API
-docker compose -f docker/docker-compose.yaml up -d --build api
-
-# Run the test suite locally
-uv run pytest
-```
+See [docs/architecture.md](docs/architecture.md) for the complete module map, transaction boundaries, alert-to-investigation flows, failure model, and the boundary prepared for RAG.

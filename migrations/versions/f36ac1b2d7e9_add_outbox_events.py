@@ -9,7 +9,6 @@ Create Date: 2026-08-06 00:00:00.000000
 from typing import Sequence, Union
 
 import sqlalchemy as sa
-import sqlmodel.sql.sqltypes
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
@@ -24,8 +23,8 @@ def upgrade() -> None:
     op.create_table(
         "outbox_events",
         sa.Column("id", sa.Uuid(), nullable=False),
-        sa.Column("topic", sqlmodel.sql.sqltypes.AutoString(), nullable=False),
-        sa.Column("key", sqlmodel.sql.sqltypes.AutoString(), nullable=False),
+        sa.Column("topic", sa.String(), nullable=False),
+        sa.Column("key", sa.String(), nullable=False),
         sa.Column(
             "payload",
             postgresql.JSONB(astext_type=sa.Text()),
@@ -37,7 +36,7 @@ def upgrade() -> None:
         sa.Column("locked_until", sa.DateTime(), nullable=True),
         sa.Column("claim_token", sa.Uuid(), nullable=True),
         sa.Column("attempts", sa.Integer(), nullable=False),
-        sa.Column("last_error", sqlmodel.sql.sqltypes.AutoString(), nullable=True),
+        sa.Column("last_error", sa.String(), nullable=True),
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index(op.f("ix_outbox_events_available_at"), "outbox_events", ["available_at"], unique=False)

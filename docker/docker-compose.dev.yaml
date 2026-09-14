@@ -14,7 +14,7 @@ x-vigilia-worker: &vigilia-worker
     VIGILIA_DB_PASSWORD: vigilia
     VIGILIA_KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
   volumes:
-    - ../app:/app/app:ro
+    - ../src:/app/src:ro
     - ../migrations:/app/migrations:ro
     - ../alembic.ini:/app/alembic.ini:ro
   depends_on:
@@ -70,9 +70,22 @@ services:
       timeout: 10s
       retries: 10
 
-  consumer:
+  api:
     <<: *vigilia-worker
-    command: ["python", "-m", "app.events.consumer"]
+    command: ["uvicorn", "vigilia.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  worker:
+    <<: *vigilia-worker
+    command: ["python", "-m", "vigilia.worker"]
     depends_on:
       postgres:
         condition: service_healthy
@@ -83,7 +96,7 @@ services:
 
   outbox-publisher:
     <<: *vigilia-worker
-    command: ["python", "-m", "app.events.outbox_publisher"]
+    command: ["python", "-m", "vigilia.publisher"]
     depends_on:
       postgres:
         condition: service_healthy

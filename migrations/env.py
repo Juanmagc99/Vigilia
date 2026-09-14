@@ -1,24 +1,18 @@
 from logging.config import fileConfig
 
-from psycopg.sql import SQL
 from sqlalchemy import engine_from_config
 from sqlalchemy import pool
 
 from alembic import context
 
-from sqlmodel import SQLModel
-
-from app.core.config import settings
-from app.db.models.alert import Alert
-from app.db.models.incident import Incident
-from app.db.models.incident_alert import IncidentAlert
-from app.db.models.outbox_event import OutboxEvent
-from app.db.models.report import Report
+from vigilia.adapters.postgres.models import Base
+from vigilia.bootstrap.settings import Settings
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
-config.set_main_option("sqlalchemy.url", settings.database_url)
+settings = Settings()
+config.set_main_option("sqlalchemy.url", settings.database_url.replace("%", "%%"))
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
@@ -29,7 +23,7 @@ if config.config_file_name is not None:
 # for 'autogenerate' support
 # from myapp import mymodel
 # target_metadata = mymodel.Base.metadata
-target_metadata = SQLModel.metadata
+target_metadata = Base.metadata
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:
