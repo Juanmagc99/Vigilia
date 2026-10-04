@@ -1,8 +1,8 @@
 import json
 from pathlib import Path
 
-from app.schemas.grafana import GrafanaWebhookPayload
-from app.services.grafana_normalizer import normalize_grafana_payload
+from vigilia.adapters.grafana.normalizer import normalize_grafana_payload
+from vigilia.adapters.grafana.schemas import GrafanaWebhookPayload
 
 
 def test_normalizes_real_grafana_notification_test_payload() -> None:

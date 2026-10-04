@@ -1,7 +1,4 @@
-def test_health_check_remains_public(
-    client,
-    configured_api_security,
-) -> None:
+def test_health_check_remains_public(client) -> None:
     res = client.get("/health")
 
     assert res.status_code == 200
