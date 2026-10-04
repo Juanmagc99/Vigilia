@@ -4,7 +4,14 @@ from types import TracebackType
 from typing import Any, Protocol, Self
 from uuid import UUID
 
-from vigilia.domain.models import AnalysisOutput, InvestigationContext, NormalizedAlert
+from vigilia.domain.models import (
+    AnalysisOutput,
+    IncidentSnapshot,
+    InvestigationContext,
+    KnowledgeChunkRecord,
+    KnowledgeEvidence,
+    NormalizedAlert,
+)
 
 
 class AlertEntity(Protocol):
@@ -144,6 +151,30 @@ class UnitOfWork(Protocol):
     async def list_legacy_reports(
         self, incident_id: UUID
     ) -> list[LegacyReportEntity]: ...
+    async def upsert_knowledge_document(
+        self,
+        *,
+        service: str,
+        environment: str,
+        source: str,
+        title: str,
+        version: str,
+        content_hash: str,
+        embedding_model: str,
+        embedding_dimensions: int,
+        chunks: tuple[KnowledgeChunkRecord, ...],
+    ) -> tuple[UUID, int]: ...
+    async def delete_knowledge_document(self, document_id: UUID) -> bool: ...
+    async def search_knowledge_chunks(
+        self,
+        *,
+        service: str,
+        environment: str,
+        embedding_model: str,
+        embedding_dimensions: int,
+        embedding: tuple[float, ...],
+        limit: int,
+    ) -> list[KnowledgeEvidence]: ...
 
 
 UnitOfWorkFactory = Callable[[], UnitOfWork]
@@ -155,3 +186,15 @@ class IncidentAnalyzer(Protocol):
     model: str
 
     async def analyze(self, context: InvestigationContext) -> AnalysisOutput: ...
+
+
+class EmbeddingProvider(Protocol):
+    model: str
+
+    async def embed(self, texts: list[str]) -> list[tuple[float, ...]]: ...
+
+
+class KnowledgeRetriever(Protocol):
+    async def retrieve(
+        self, incident: IncidentSnapshot
+    ) -> tuple[KnowledgeEvidence, ...]: ...

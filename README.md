@@ -1,6 +1,6 @@
 # Vigilia
 
-Vigilia is a backend for receiving operational alerts, correlating them into incidents, and running durable incident investigations. Investigations can use the deterministic simulator or a provider-agnostic LLM adapter through LiteLLM. Operational knowledge retrieval (RAG) is the next phase.
+Vigilia is a backend for receiving operational alerts, correlating them into incidents, and running durable incident investigations. Investigations can use the deterministic simulator or a provider-agnostic LLM adapter through LiteLLM. Optional RAG retrieval adds operational documents to an investigation as auditable evidence.
 
 ## Architecture
 
@@ -62,7 +62,23 @@ uv sync
 docker compose -f docker/docker-compose.dev.yaml up --build
 ```
 
-The development stack applies Alembic migrations before starting the API and workers. Existing alerts, incidents, outbox events, and reports are retained. Historical reports are copied into completed investigations while the original table remains read-only.
+The development stack applies Alembic migrations, initializes the Redpanda topics,
+and then starts the API and workers. Existing alerts, incidents, outbox events, and
+reports are retained. Historical reports are copied into completed investigations
+while the original table remains read-only.
+
+To enable RAG locally, configure `VIGILIA_RAG_ENABLED=true` and
+`VIGILIA_RAG_EMBEDDING_MODEL` in `.env`. If generation and embeddings use the same
+provider, the embedding adapter reuses `VIGILIA_LLM_API_KEY`; otherwise configure
+`VIGILIA_RAG_EMBEDDING_API_KEY`. The sample runbooks can then be indexed with:
+
+```bash
+uv run python scripts/seed_knowledge.py
+```
+
+This sends only the fictional documents in `scripts/runbooks/` to the embedding
+provider. Re-running the command replaces the same three documents in place. See
+[`docs/rag.md`](docs/rag.md) for retrieval scope and configuration details.
 
 For host execution against containerized PostgreSQL and Redpanda:
 
@@ -94,6 +110,14 @@ All configuration uses the `VIGILIA_` prefix. Important settings are documented 
 | `LLM_TIMEOUT_SECONDS` | `45` | Provider call deadline |
 | `LLM_MAX_OUTPUT_TOKENS` | `1200` | Maximum generated tokens per attempt |
 | `LLM_MAX_ALERTS` | `50` | Maximum recent alerts sent to the model |
+| `RAG_ENABLED` | `false` | Enable document ingestion and knowledge retrieval |
+| `RAG_EMBEDDING_MODEL` | none | LiteLLM embedding model; required when RAG is enabled |
+| `RAG_EMBEDDING_API_KEY`, `RAG_EMBEDDING_API_BASE` | none | Optional embedding-provider credentials and endpoint |
+| `RAG_EMBEDDING_BATCH_SIZE` | `64` | Chunks per embedding request |
+| `RAG_CHUNK_SIZE`, `RAG_CHUNK_OVERLAP` | `2400`, `300` | Document chunking limits in characters |
+| `RAG_MAX_DOCUMENT_CHARACTERS` | `250000` | Maximum indexed document size |
+| `RAG_TOP_K` | `5` | Maximum knowledge chunks retrieved per investigation |
+| `RAG_MAX_CONTEXT_CHARACTERS` | `16000` | Maximum retrieved text added to an analysis |
 | `GRAFANA_WEBHOOK_HMAC_SECRET` | none | Grafana request authentication |
 | `API_TOKEN` | none | Incident API Bearer authentication |
 
@@ -117,6 +141,11 @@ The default remains `simulated`, so local infrastructure and API flows do not co
 
 The previous blocking `POST /incidents/{id}/report` endpoint no longer exists.
 
+When RAG is enabled, `POST /knowledge/documents` ingests or replaces a Markdown/text
+document and `DELETE /knowledge/documents/{document_id}` removes it from future
+retrieval. Both require the API Bearer token. See [the detailed RAG guide](docs/rag.md)
+for request format, configuration, reindexing, privacy and retrieval behavior.
+
 ## Reliability model
 
 - Business writes and outbox events share one database transaction.
@@ -127,4 +156,6 @@ The previous blocking `POST /incidents/{id}/report` endpoint no longer exists.
 - A stale worker cannot overwrite a newer attempt.
 - Transient analysis failures are rescheduled through a delayed outbox event.
 
-See [docs/architecture.md](docs/architecture.md) for the complete module map, transaction boundaries, alert-to-investigation flows, failure model, and the boundary prepared for RAG.
+See [docs/architecture.md](docs/architecture.md) for the complete module map,
+transaction boundaries, alert-to-investigation flows and failure model. [The RAG
+guide](docs/rag.md) covers document ingestion, embeddings, retrieval, and audit data.

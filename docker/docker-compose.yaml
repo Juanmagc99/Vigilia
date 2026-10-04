@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:17.10
+    image: pgvector/pgvector:pg17
     environment:
       POSTGRES_USER: vigilia
       POSTGRES_PASSWORD: vigilia

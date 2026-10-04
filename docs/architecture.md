@@ -21,9 +21,9 @@ La correlación no usa IA. El modelo no decide qué alertas pertenecen a una
 incidencia. Su responsabilidad empieza cuando ya existe una instantánea durable y
 consistente que analizar.
 
-RAG todavía no está implementado. La frontera ya acepta conocimiento operacional
-para que la siguiente fase añada documentos y recuperación sin cambiar el worker ni
-acoplar la aplicación a un proveedor de modelos.
+RAG incorpora documentos operativos a las investigaciones mediante recuperación
+semántica en PostgreSQL/pgvector. La ingesta usa un proveedor de embeddings detrás de
+LiteLLM y el analizador conserva su contrato `InvestigationContext`.
 
 ## 2. Vista general
 
@@ -41,7 +41,7 @@ flowchart LR
     A --> SIM[Simulador]
     A --> LL[LiteLLM]
     LL --> P[Proveedor configurado]
-    K[(Conocimiento / pgvector futuro)] -.->|RAG futuro| W
+    K[(PostgreSQL + pgvector)] -->|fragmentos recuperados| W
 ```
 
 PostgreSQL es la fuente de verdad. Redpanda transporta notificaciones de trabajo,
@@ -472,7 +472,7 @@ Los engines se crean por proceso y se cierran al salir de su gestor de recursos.
 sesiones se crean por operación. Los clientes Kafka pertenecen al entrypoint que los
 usa y se cierran durante el apagado ordenado.
 
-## 14. Frontera preparada para RAG
+## 14. Recuperación aumentada con conocimiento (RAG)
 
 `InvestigationContext` ya contiene:
 
@@ -481,37 +481,52 @@ incident: IncidentSnapshot
 knowledge: tuple[KnowledgeEvidence, ...]
 ```
 
-Actualmente `knowledge` está vacío. La siguiente fase añadirá un puerto de
-recuperación antes de llamar al analizador:
+Cuando `VIGILIA_RAG_ENABLED=true`, `ExecuteInvestigation` recupera fragmentos tras
+reclamar el trabajo durable y crear el snapshot, justo antes de llamar a
+`IncidentAnalyzer`:
 
 ```mermaid
 flowchart LR
     S[IncidentSnapshot] --> Q[Construir consulta]
     Q --> R[KnowledgeRetriever]
     R --> V[(pgvector)]
-    V --> K[Chunks autorizados y versionados]
+    V --> K[Chunks por servicio, entorno y modelo de embeddings]
     S --> C[InvestigationContext]
     K --> C
     C --> A[IncidentAnalyzer]
 ```
 
-El futuro recuperador pertenecerá a aplicación y adaptadores, no a LiteLLM. La
-indexación será un pipeline separado de la investigación. Cada fragmento tendrá ID,
-documento, versión y servicio; las citas usarán `knowledge:<uuid>` y se validarán con
-la misma regla aplicada hoy a las alertas.
+`IngestKnowledgeDocument` limpia patrones comunes de credenciales, fragmenta texto
+con límites configurables, calcula embeddings con LiteLLM y reemplaza de forma
+transaccional los fragmentos del documento. Documentos se identifican por servicio,
+entorno y fuente. La búsqueda exige coincidencia del entorno y el modelo de
+embeddings, y permite documentos compartidos con el servicio `*`.
 
-Quedan deliberadamente fuera de esta fase:
+La primera versión usa distancia coseno y búsqueda exacta de pgvector. No se crea un
+índice ANN hasta medir un corpus real; de este modo no se intercambia recall por
+latencia sin evidencia. El límite `VIGILIA_RAG_TOP_K` restringe candidatos y
+`VIGILIA_RAG_MAX_CONTEXT_CHARACTERS` restringe texto enviado al analizador.
 
-- tablas de documentos y chunks;
-- extensión pgvector e índices vectoriales;
-- estrategia de fragmentación;
-- adaptador de embeddings;
-- filtros por servicio y dependencias;
-- presupuesto de contexto y ranking híbrido;
-- evaluaciones de recuperación y fundamentación.
+Las citas siguen el contrato de evidencia existente con IDs `knowledge:<uuid>` y se
+validan contra los elementos realmente incluidos en el contexto. El resultado
+persistido guarda las evidencias citadas en `evidence` y el snapshot de los fragmentos
+recuperados en `retrieved_knowledge`. El prompt trata alertas y documentos como datos
+no confiables, no como instrucciones.
+
+La ingesta está disponible mediante `POST /knowledge/documents`, y el borrado por
+`DELETE /knowledge/documents/{document_id}`. Ambos endpoints usan el Bearer token de
+la API. La carga acepta Markdown/texto; no se descargan URLs ni se conectan repositorios
+en esta fase. Los resultados completados conservan sus fragmentos históricos aunque
+se reemplace o borre el documento del índice.
+
+La configuración completa, el formato de API, el funcionamiento de chunking,
+embeddings, aislamiento, límites y operación local se detalla en
+[`docs/rag.md`](rag.md). La decisión de almacenamiento consta en
+[`ADR 0004`](decisions/0004-postgres-pgvector-rag.md).
 
 ## 15. Decisiones relacionadas
 
 - [ADR 0001: Async SQLAlchemy persistence](decisions/0001-async-sqlalchemy.md)
 - [ADR 0002: Durable investigation jobs](decisions/0002-durable-investigations.md)
 - [ADR 0003: Provider-agnostic model adapter through LiteLLM](decisions/0003-provider-agnostic-llm.md)
+- [ADR 0004: Operational knowledge with pgvector](decisions/0004-postgres-pgvector-rag.md)

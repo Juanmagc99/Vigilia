@@ -2,6 +2,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, Response, status
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import text
 
 from vigilia.adapters.grafana.normalizer import normalize_grafana_payload
@@ -12,9 +13,10 @@ from vigilia.application.contracts import (
     IncidentDetail,
     IncidentSummary,
     InvestigationRead,
+    KnowledgeDocumentWrite,
     LegacyReportRead,
 )
-
+from vigilia.application.errors import FeatureUnavailableAppError
 
 router = APIRouter()
 
@@ -57,9 +59,54 @@ async def receive_grafana_webhook(
 protected = APIRouter(dependencies=[Depends(verify_api_token)])
 
 
+class KnowledgeDocumentRequest(BaseModel):
+    service: str = Field(min_length=1, max_length=160)
+    source: str = Field(min_length=1, max_length=500)
+    title: str = Field(min_length=1, max_length=300)
+    version: str = Field(min_length=1, max_length=100)
+    content: str = Field(min_length=1, max_length=2_000_000)
+    model_config = ConfigDict(extra="forbid")
+
+
 @protected.get("/incidents", response_model=list[IncidentSummary], tags=["incidents"])
 async def list_incidents(application: ApplicationDependency) -> list[IncidentSummary]:
     return await application.incident_queries.list()
+
+
+@protected.post(
+    "/knowledge/documents",
+    response_model=KnowledgeDocumentWrite,
+    status_code=status.HTTP_201_CREATED,
+    tags=["knowledge"],
+)
+async def ingest_knowledge_document(
+    payload: KnowledgeDocumentRequest, application: ApplicationDependency
+) -> KnowledgeDocumentWrite:
+    if application.ingest_knowledge_document is None:
+        raise FeatureUnavailableAppError(
+            message="Knowledge retrieval is not enabled",
+            code="knowledge_not_enabled",
+        )
+    document_id, chunk_count = await application.ingest_knowledge_document.execute(
+        service=payload.service,
+        source=payload.source,
+        title=payload.title,
+        version=payload.version,
+        content=payload.content,
+    )
+    return KnowledgeDocumentWrite(id=document_id, chunks=chunk_count)
+
+
+@protected.delete(
+    "/knowledge/documents/{document_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    tags=["knowledge"],
+)
+async def delete_knowledge_document(
+    document_id: UUID, application: ApplicationDependency
+) -> Response:
+    await application.delete_knowledge_document.execute(document_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @protected.get(

@@ -26,7 +26,7 @@ x-vigilia-worker: &vigilia-worker
 
 services:
   postgres:
-    image: postgres:17.10
+    image: pgvector/pgvector:pg17
     environment:
       POSTGRES_USER: vigilia
       POSTGRES_PASSWORD: vigilia
@@ -70,6 +70,23 @@ services:
       timeout: 10s
       retries: 10
 
+  topics-init:
+    image: docker.redpanda.com/redpandadata/redpanda:v26.1.14
+    entrypoint: ["rpk"]
+    command:
+      - topic
+      - create
+      - alerts.received.v1
+      - alerts.received
+      - investigations.requested.v1
+      - --if-not-exists
+      - -X
+      - brokers=redpanda:9092
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    restart: "no"
+
   api:
     <<: *vigilia-worker
     command: ["uvicorn", "vigilia.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--reload"]
@@ -93,6 +110,8 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+      topics-init:
+        condition: service_completed_successfully
 
   outbox-publisher:
     <<: *vigilia-worker
@@ -103,6 +122,8 @@ services:
       redpanda:
         condition: service_healthy
       migrate:
+        condition: service_completed_successfully
+      topics-init:
         condition: service_completed_successfully
 
   migrate:

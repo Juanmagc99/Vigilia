@@ -40,6 +40,18 @@ class Settings(BaseSettings):
     llm_max_output_tokens: int = Field(default=1200, ge=100, le=16000)
     llm_max_alerts: int = Field(default=50, ge=1, le=500)
 
+    rag_enabled: bool = False
+    rag_embedding_model: str | None = None
+    rag_embedding_api_key: SecretStr | None = None
+    rag_embedding_api_base: str | None = None
+    rag_embedding_timeout_seconds: float = Field(default=30.0, gt=0, le=300)
+    rag_embedding_batch_size: int = Field(default=64, ge=1, le=256)
+    rag_chunk_size: int = Field(default=2400, ge=200, le=12000)
+    rag_chunk_overlap: int = Field(default=300, ge=0, le=2000)
+    rag_max_document_characters: int = Field(default=250000, ge=1000, le=2000000)
+    rag_top_k: int = Field(default=5, ge=1, le=20)
+    rag_max_context_characters: int = Field(default=16000, ge=1000, le=100000)
+
     grafana_webhook_hmac_secret: SecretStr | None = None
     grafana_webhook_max_age_seconds: int = Field(default=300, gt=0, le=3600)
     api_token: SecretStr | None = None
@@ -55,6 +67,14 @@ class Settings(BaseSettings):
     def validate_analyzer_configuration(self) -> "Settings":
         if self.investigation_analyzer == "litellm" and not self.llm_model:
             raise ValueError("VIGILIA_LLM_MODEL is required for the LiteLLM analyzer")
+        if self.rag_enabled and not self.rag_embedding_model:
+            raise ValueError(
+                "VIGILIA_RAG_EMBEDDING_MODEL is required when RAG is enabled"
+            )
+        if self.rag_chunk_overlap >= self.rag_chunk_size:
+            raise ValueError(
+                "VIGILIA_RAG_CHUNK_OVERLAP must be smaller than chunk size"
+            )
         return self
 
     @cached_property
@@ -68,5 +88,9 @@ class Settings(BaseSettings):
     @property
     def analyzer_version(self) -> str:
         if self.investigation_analyzer == "simulated":
-            return "simulated-v1"
-        return f"litellm:{self.llm_model}:investigation-v1"
+            base_version = "simulated-v1"
+        else:
+            base_version = f"litellm:{self.llm_model}:investigation-v1"
+        if self.rag_enabled:
+            return f"{base_version}:rag:{self.rag_embedding_model}:v1"
+        return base_version

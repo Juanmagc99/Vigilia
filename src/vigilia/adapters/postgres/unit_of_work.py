@@ -150,6 +150,15 @@ class SqlAlchemyUnitOfWork:
     async def list_legacy_reports(self, incident_id):
         return await repositories.list_legacy_reports(self.session, incident_id)
 
+    async def upsert_knowledge_document(self, **values: Any):
+        return await repositories.upsert_knowledge_document(self.session, **values)
+
+    async def delete_knowledge_document(self, document_id):
+        return await repositories.delete_knowledge_document(self.session, document_id)
+
+    async def search_knowledge_chunks(self, **values: Any):
+        return await repositories.search_knowledge_chunks(self.session, **values)
+
 
 def create_unit_of_work_factory(sessions: async_sessionmaker[AsyncSession]):
     return lambda: SqlAlchemyUnitOfWork(sessions)

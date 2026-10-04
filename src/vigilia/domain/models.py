@@ -86,8 +86,10 @@ class KnowledgeEvidence:
     document_id: UUID
     service: str
     title: str
+    source: str
     content: str
     version: str
+    similarity: float
 
 
 @dataclass(frozen=True)
@@ -105,6 +107,7 @@ class AnalysisResult:
     evidence: tuple[dict[str, Any], ...]
     recommended_checks: tuple[str, ...]
     missing_information: tuple[str, ...]
+    retrieved_knowledge: tuple[dict[str, Any], ...] = ()
 
     def as_json(self) -> dict[str, Any]:
         return {
@@ -115,7 +118,15 @@ class AnalysisResult:
             "evidence": list(self.evidence),
             "recommended_checks": list(self.recommended_checks),
             "missing_information": list(self.missing_information),
+            "retrieved_knowledge": list(self.retrieved_knowledge),
         }
+
+
+@dataclass(frozen=True)
+class KnowledgeChunkRecord:
+    index: int
+    content: str
+    embedding: tuple[float, ...]
 
 
 @dataclass(frozen=True)

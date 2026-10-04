@@ -3,6 +3,7 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     DateTime,
     ForeignKey,
@@ -206,6 +207,48 @@ class InvestigationAttemptModel(Base):
     total_tokens: Mapped[int | None] = mapped_column(Integer)
     estimated_cost_usd: Mapped[Decimal | None] = mapped_column(Numeric(14, 8))
     latency_ms: Mapped[int | None] = mapped_column(Integer)
+
+
+class KnowledgeDocumentModel(Base):
+    __tablename__ = "knowledge_documents"
+    __table_args__ = (
+        UniqueConstraint(
+            "service", "environment", "source", name="uq_knowledge_document_scope"
+        ),
+        Index("ix_knowledge_documents_scope", "service", "environment"),
+    )
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    service: Mapped[str] = mapped_column(String, nullable=False)
+    environment: Mapped[str] = mapped_column(String, nullable=False)
+    source: Mapped[str] = mapped_column(String, nullable=False)
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    version: Mapped[str] = mapped_column(String, nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    embedding_model: Mapped[str] = mapped_column(String, nullable=False)
+    embedding_dimensions: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
+class KnowledgeChunkModel(Base):
+    __tablename__ = "knowledge_chunks"
+    __table_args__ = (
+        UniqueConstraint(
+            "document_id", "chunk_index", name="uq_knowledge_chunk_document_index"
+        ),
+        Index("ix_knowledge_chunks_document", "document_id"),
+    )
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    document_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("knowledge_documents.id", ondelete="CASCADE"), nullable=False
+    )
+    chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    embedding: Mapped[list[float]] = mapped_column(Vector(), nullable=False)
 
 
 class ProcessedEventModel(Base):

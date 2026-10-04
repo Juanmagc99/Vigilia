@@ -98,6 +98,11 @@ class AlertIngestionResult(BaseModel):
     events_queued: int
 
 
+class KnowledgeDocumentWrite(BaseModel):
+    id: UUID
+    chunks: int
+
+
 class EventEnvelope(BaseModel):
     event_id: UUID = Field(default_factory=uuid4)
     event_type: str

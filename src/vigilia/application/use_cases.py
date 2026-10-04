@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
@@ -20,6 +21,7 @@ from vigilia.application.errors import (
 from vigilia.application.ports import (
     IncidentAnalyzer,
     InvestigationEntity,
+    KnowledgeRetriever,
     UnitOfWork,
     UnitOfWorkFactory,
 )
@@ -315,6 +317,7 @@ class ExecuteInvestigation:
         lease_seconds: int,
         max_attempts: int,
         max_retry_delay_seconds: int,
+        knowledge_retriever: KnowledgeRetriever | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._analyzer = analyzer
@@ -322,6 +325,7 @@ class ExecuteInvestigation:
         self._lease_seconds = lease_seconds
         self._max_attempts = max_attempts
         self._max_retry_delay_seconds = max_retry_delay_seconds
+        self._knowledge_retriever = knowledge_retriever
 
     async def execute(
         self, event_id: UUID, investigation_id: UUID, causation_id: UUID | None
@@ -333,9 +337,34 @@ class ExecuteInvestigation:
             return True
         token, snapshot = claimed
         try:
-            output = await self._analyzer.analyze(
-                InvestigationContext(incident=snapshot)
+            knowledge = (
+                await self._knowledge_retriever.retrieve(snapshot)
+                if self._knowledge_retriever
+                else ()
             )
+            output = await self._analyzer.analyze(
+                InvestigationContext(incident=snapshot, knowledge=knowledge)
+            )
+            if knowledge:
+                output = replace(
+                    output,
+                    result=replace(
+                        output.result,
+                        retrieved_knowledge=tuple(
+                            {
+                                "evidence_id": f"knowledge:{item.id}",
+                                "document_id": str(item.document_id),
+                                "service": item.service,
+                                "title": item.title,
+                                "source": item.source,
+                                "version": item.version,
+                                "similarity": item.similarity,
+                                "content": item.content,
+                            }
+                            for item in knowledge
+                        ),
+                    ),
+                )
         except TransientInvestigationError as exc:
             await self._record_failure(
                 event_id,
@@ -360,14 +389,14 @@ class ExecuteInvestigation:
             return True
         except Exception:
             logger.exception(
-                "Unexpected analyzer failure investigation_id=%s", investigation_id
+                "Unexpected investigation failure investigation_id=%s", investigation_id
             )
             await self._record_failure(
                 event_id,
                 investigation_id,
                 token,
-                "unexpected_analyzer_error",
-                "The analyzer failed unexpectedly",
+                "unexpected_investigation_error",
+                "The investigation failed unexpectedly",
                 causation_id,
                 retryable=False,
             )

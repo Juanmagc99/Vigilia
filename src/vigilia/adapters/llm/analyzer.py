@@ -148,7 +148,10 @@ class LiteLLMIncidentAnalyzer:
                     "id": f"knowledge:{item.id}",
                     "document_id": str(item.document_id),
                     "title": item.title,
+                    "source": item.source,
+                    "service": item.service,
                     "version": item.version,
+                    "similarity": item.similarity,
                 }
                 for item in context.knowledge
             }
@@ -182,6 +185,19 @@ class LiteLLMIncidentAnalyzer:
             evidence=tuple(available[item] for item in unique_cited_ids),
             recommended_checks=tuple(draft.recommended_checks),
             missing_information=tuple(draft.missing_information),
+            retrieved_knowledge=tuple(
+                {
+                    "evidence_id": f"knowledge:{item.id}",
+                    "document_id": str(item.document_id),
+                    "service": item.service,
+                    "title": item.title,
+                    "source": item.source,
+                    "version": item.version,
+                    "similarity": item.similarity,
+                    "content": item.content,
+                }
+                for item in context.knowledge
+            ),
         )
 
     def _usage(self, response: Any, latency_ms: int) -> AnalysisUsage:

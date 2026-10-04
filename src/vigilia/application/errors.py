@@ -40,6 +40,20 @@ class ConflictAppError(AppError):
     default_message = "Resource conflict"
 
 
+class ValidationAppError(AppError):
+    status_code = 422
+    error_type = "validation_error"
+    default_code = "invalid_request"
+    default_message = "Request validation failed"
+
+
+class FeatureUnavailableAppError(AppError):
+    status_code = 503
+    error_type = "feature_unavailable"
+    default_code = "feature_disabled"
+    default_message = "Feature is not enabled"
+
+
 class AuthenticationAppError(AppError):
     status_code = 401
     error_type = "authentication_error"

@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import asc, desc, or_, select, text
+from sqlalchemy import asc, delete, desc, or_, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,6 +11,8 @@ from vigilia.adapters.postgres.models import (
     IncidentModel,
     InvestigationAttemptModel,
     InvestigationModel,
+    KnowledgeChunkModel,
+    KnowledgeDocumentModel,
     OutboxEventModel,
     ProcessedEventModel,
     ReportModel,
@@ -240,6 +242,117 @@ async def list_legacy_reports(
         .order_by(desc(ReportModel.created_at))
     )
     return list((await session.scalars(statement)).all())
+
+
+async def upsert_knowledge_document(
+    session: AsyncSession,
+    *,
+    service: str,
+    environment: str,
+    source: str,
+    title: str,
+    version: str,
+    content_hash: str,
+    embedding_model: str,
+    embedding_dimensions: int,
+    chunks,
+) -> tuple[UUID, int]:
+    now = utcnow()
+    statement = (
+        insert(KnowledgeDocumentModel)
+        .values(
+            service=service,
+            environment=environment,
+            source=source,
+            title=title,
+            version=version,
+            content_hash=content_hash,
+            embedding_model=embedding_model,
+            embedding_dimensions=embedding_dimensions,
+            created_at=now,
+            updated_at=now,
+        )
+        .on_conflict_do_update(
+            index_elements=["service", "environment", "source"],
+            set_={
+                "title": title,
+                "version": version,
+                "content_hash": content_hash,
+                "embedding_model": embedding_model,
+                "embedding_dimensions": embedding_dimensions,
+                "updated_at": now,
+            },
+        )
+        .returning(KnowledgeDocumentModel.id)
+    )
+    document_id = await session.scalar(statement)
+    await session.execute(
+        delete(KnowledgeChunkModel).where(
+            KnowledgeChunkModel.document_id == document_id
+        )
+    )
+    session.add_all(
+        KnowledgeChunkModel(
+            document_id=document_id,
+            chunk_index=chunk.index,
+            content=chunk.content,
+            embedding=list(chunk.embedding),
+        )
+        for chunk in chunks
+    )
+    return document_id, len(chunks)
+
+
+async def delete_knowledge_document(session: AsyncSession, document_id: UUID) -> bool:
+    document = await session.get(KnowledgeDocumentModel, document_id)
+    if document is None:
+        return False
+    await session.delete(document)
+    return True
+
+
+async def search_knowledge_chunks(
+    session: AsyncSession,
+    *,
+    service: str,
+    environment: str,
+    embedding_model: str,
+    embedding_dimensions: int,
+    embedding: tuple[float, ...],
+    limit: int,
+):
+    from vigilia.domain.models import KnowledgeEvidence
+
+    distance = KnowledgeChunkModel.embedding.cosine_distance(list(embedding))
+    statement = (
+        select(KnowledgeChunkModel, KnowledgeDocumentModel, distance.label("distance"))
+        .join(
+            KnowledgeDocumentModel,
+            KnowledgeDocumentModel.id == KnowledgeChunkModel.document_id,
+        )
+        .where(
+            KnowledgeDocumentModel.service.in_((service, "*")),
+            KnowledgeDocumentModel.environment == environment,
+            KnowledgeDocumentModel.embedding_model == embedding_model,
+            KnowledgeDocumentModel.embedding_dimensions == embedding_dimensions,
+        )
+        .order_by(distance)
+        .limit(limit)
+    )
+    rows = (await session.execute(statement)).all()
+    return [
+        KnowledgeEvidence(
+            id=chunk.id,
+            document_id=document.id,
+            service=document.service,
+            title=document.title,
+            source=document.source,
+            content=chunk.content,
+            version=document.version,
+            similarity=1.0 - float(distance_value),
+        )
+        for chunk, document, distance_value in rows
+    ]
 
 
 async def claim_outbox_events(
