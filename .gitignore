@@ -12,8 +12,6 @@ wheels/
 .env
 vigilia-ws.code-workspace
 
-VIGILIA_FLOW.md
-VIGILIA_ROADMAP.md
-ROADMAP.md
-
 .agents
+
+.ruff_cache

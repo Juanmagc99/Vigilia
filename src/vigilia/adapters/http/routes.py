@@ -1,7 +1,7 @@
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, Response, status
+from fastapi import APIRouter, Depends, Header, Query, Response, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import text
 
@@ -10,11 +10,12 @@ from vigilia.adapters.grafana.schemas import GrafanaWebhookPayload
 from vigilia.adapters.http.dependencies import ApplicationDependency
 from vigilia.adapters.http.security import verify_api_token, verify_grafana_signature
 from vigilia.application.contracts import (
+    AlertPage,
     IncidentDetail,
     IncidentSummary,
     InvestigationRead,
+    KnowledgeDocumentPage,
     KnowledgeDocumentWrite,
-    LegacyReportRead,
 )
 from vigilia.application.errors import FeatureUnavailableAppError
 
@@ -68,9 +69,33 @@ class KnowledgeDocumentRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+@protected.get("/alerts", response_model=AlertPage, tags=["alerts"])
+async def list_alerts(
+    application: ApplicationDependency,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    service: Annotated[str | None, Query(min_length=1, max_length=160)] = None,
+    status: Literal["firing", "resolved"] | None = None,
+) -> AlertPage:
+    return await application.alert_queries.list(
+        limit=limit, offset=offset, service=service, status=status
+    )
+
+
 @protected.get("/incidents", response_model=list[IncidentSummary], tags=["incidents"])
 async def list_incidents(application: ApplicationDependency) -> list[IncidentSummary]:
     return await application.incident_queries.list()
+
+
+@protected.get(
+    "/knowledge/documents", response_model=KnowledgeDocumentPage, tags=["knowledge"]
+)
+async def list_knowledge_documents(
+    application: ApplicationDependency,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> KnowledgeDocumentPage:
+    return await application.knowledge_queries.list(limit=limit, offset=offset)
 
 
 @protected.post(
@@ -159,20 +184,6 @@ async def list_investigations(
     incident_id: UUID, application: ApplicationDependency
 ) -> list[InvestigationRead]:
     return await application.investigation_queries.list_for_incident(incident_id)
-
-
-@protected.get(
-    "/incidents/{incident_id}/reports",
-    response_model=list[LegacyReportRead],
-    tags=["legacy"],
-    deprecated=True,
-)
-async def list_legacy_reports(
-    incident_id: UUID, response: Response, application: ApplicationDependency
-) -> list[LegacyReportRead]:
-    response.headers["Deprecation"] = "true"
-    response.headers["Sunset"] = "undetermined"
-    return await application.investigation_queries.list_legacy_reports(incident_id)
 
 
 router.include_router(protected)

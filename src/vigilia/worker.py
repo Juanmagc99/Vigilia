@@ -27,7 +27,6 @@ async def run_worker() -> None:
                 dict.fromkeys(
                     (
                         settings.alerts_received_topic,
-                        settings.legacy_alerts_received_topic,
                         settings.investigations_requested_topic,
                     )
                 )

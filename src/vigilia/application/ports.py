@@ -86,12 +86,13 @@ class AttemptEntity(Protocol):
     latency_ms: int | None
 
 
-class LegacyReportEntity(Protocol):
+class KnowledgeDocumentEntity(Protocol):
     id: UUID
-    incident_id: UUID
-    model: str
-    content: dict[str, Any]
-    created_at: datetime
+    service: str
+    source: str
+    title: str
+    version: str
+    updated_at: datetime
 
 
 class UnitOfWork(Protocol):
@@ -104,6 +105,9 @@ class UnitOfWork(Protocol):
     ) -> None: ...
     async def save_alerts(self, alerts: list[NormalizedAlert]) -> list[AlertEntity]: ...
     async def find_alert(self, alert_id: UUID) -> AlertEntity | None: ...
+    async def list_alerts(
+        self, *, limit: int, offset: int, service: str | None, status: str | None
+    ) -> tuple[list[tuple[AlertEntity, UUID | None]], int]: ...
     async def lock_correlation_service(self, service: str) -> None: ...
     async def find_recent_open_incident(
         self, service: str, since: datetime
@@ -148,9 +152,6 @@ class UnitOfWork(Protocol):
     async def create_attempt(self, **values: Any) -> AttemptEntity: ...
     async def find_attempt_by_token(self, token: UUID) -> AttemptEntity | None: ...
     async def list_attempts(self, investigation_id: UUID) -> list[AttemptEntity]: ...
-    async def list_legacy_reports(
-        self, incident_id: UUID
-    ) -> list[LegacyReportEntity]: ...
     async def upsert_knowledge_document(
         self,
         *,
@@ -165,6 +166,9 @@ class UnitOfWork(Protocol):
         chunks: tuple[KnowledgeChunkRecord, ...],
     ) -> tuple[UUID, int]: ...
     async def delete_knowledge_document(self, document_id: UUID) -> bool: ...
+    async def list_knowledge_documents(
+        self, *, environment: str, limit: int, offset: int
+    ) -> tuple[list[tuple[KnowledgeDocumentEntity, int]], int]: ...
     async def search_knowledge_chunks(
         self,
         *,

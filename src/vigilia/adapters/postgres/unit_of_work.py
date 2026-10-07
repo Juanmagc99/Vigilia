@@ -42,6 +42,11 @@ class SqlAlchemyUnitOfWork:
     async def find_alert(self, alert_id):
         return await repositories.find_alert(self.session, alert_id)
 
+    async def list_alerts(self, *, limit, offset, service, status):
+        return await repositories.list_alerts(
+            self.session, limit=limit, offset=offset, service=service, status=status
+        )
+
     async def lock_correlation_service(self, service):
         await repositories.lock_correlation_service(self.session, service)
 
@@ -147,14 +152,16 @@ class SqlAlchemyUnitOfWork:
     async def list_attempts(self, investigation_id):
         return await repositories.list_attempts(self.session, investigation_id)
 
-    async def list_legacy_reports(self, incident_id):
-        return await repositories.list_legacy_reports(self.session, incident_id)
-
     async def upsert_knowledge_document(self, **values: Any):
         return await repositories.upsert_knowledge_document(self.session, **values)
 
     async def delete_knowledge_document(self, document_id):
         return await repositories.delete_knowledge_document(self.session, document_id)
+
+    async def list_knowledge_documents(self, *, environment, limit, offset):
+        return await repositories.list_knowledge_documents(
+            self.session, environment=environment, limit=limit, offset=offset
+        )
 
     async def search_knowledge_chunks(self, **values: Any):
         return await repositories.search_knowledge_chunks(self.session, **values)

@@ -1,1 +1,8 @@
-Generic single-database configuration.
+Alembic mantiene la cadena completa de evolución del esquema PostgreSQL.
+
+Desde el host: uv run --locked alembic upgrade head
+Desde Docker: make dev-migrate
+
+La migración a41c928c7f10 copia reports históricos a investigaciones completadas.
+La tabla reports queda archivada para conservar datos y metadata de Alembic.
+No borrar revisiones ya aplicadas ni regenerar la cadena para limpiar el código.

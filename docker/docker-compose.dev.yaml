@@ -1,152 +1,20 @@
-x-vigilia-worker: &vigilia-worker
+# Merge with docker-compose.yaml; Makefile supplies both files.
+x-dev: &dev
   image: vigilia:dev
-  build:
-    context: ..
-    dockerfile: docker/Dockerfile
-  env_file:
-    - ../.env
-  environment: &vigilia-environment
+  environment:
     VIGILIA_ENVIRONMENT: docker-dev
-    VIGILIA_DB_HOST: postgres
-    VIGILIA_DB_PORT: 5432
-    VIGILIA_DB_NAME: vigilia
-    VIGILIA_DB_USER: vigilia
-    VIGILIA_DB_PASSWORD: vigilia
-    VIGILIA_KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
   volumes:
     - ../src:/app/src:ro
     - ../migrations:/app/migrations:ro
     - ../alembic.ini:/app/alembic.ini:ro
-  depends_on:
-    postgres:
-      condition: service_healthy
-    redpanda:
-      condition: service_healthy
-  restart: unless-stopped
 
 services:
-  postgres:
-    image: pgvector/pgvector:pg17
-    environment:
-      POSTGRES_USER: vigilia
-      POSTGRES_PASSWORD: vigilia
-      POSTGRES_DB: vigilia
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U vigilia -d vigilia"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-
-  redpanda:
-    image: docker.redpanda.com/redpandadata/redpanda:v26.1.14
-    command:
-      - redpanda
-      - start
-      - --kafka-addr
-      - internal://0.0.0.0:9092,external://0.0.0.0:19092
-      - --advertise-kafka-addr
-      - internal://redpanda:9092,external://localhost:19092
-      - --rpc-addr
-      - redpanda:33145
-      - --advertise-rpc-addr
-      - redpanda:33145
-      - --mode
-      - dev-container
-      - --smp
-      - "1"
-      - --default-log-level=info
-    ports:
-      - "19092:19092"
-      - "9644:9644"
-    volumes:
-      - redpanda-data:/var/lib/redpanda/data
-    healthcheck:
-      test: ["CMD", "rpk", "cluster", "info"]
-      interval: 10s
-      timeout: 10s
-      retries: 10
-
-  topics-init:
-    image: docker.redpanda.com/redpandadata/redpanda:v26.1.14
-    entrypoint: ["rpk"]
-    command:
-      - topic
-      - create
-      - alerts.received.v1
-      - alerts.received
-      - investigations.requested.v1
-      - --if-not-exists
-      - -X
-      - brokers=redpanda:9092
-    depends_on:
-      redpanda:
-        condition: service_healthy
-    restart: "no"
-
   api:
-    <<: *vigilia-worker
+    <<: *dev
     command: ["uvicorn", "vigilia.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--reload"]
-    ports:
-      - "8000:8000"
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redpanda:
-        condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
-
   worker:
-    <<: *vigilia-worker
-    command: ["python", "-m", "vigilia.worker"]
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redpanda:
-        condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
-      topics-init:
-        condition: service_completed_successfully
-
+    <<: *dev
   outbox-publisher:
-    <<: *vigilia-worker
-    command: ["python", "-m", "vigilia.publisher"]
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redpanda:
-        condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
-      topics-init:
-        condition: service_completed_successfully
-
+    <<: *dev
   migrate:
-    <<: *vigilia-worker
-    command: ["alembic", "upgrade", "head"]
-    environment:
-      <<: *vigilia-environment
-    depends_on:
-      postgres:
-        condition: service_healthy
-    restart: "no"
-
-  grafana:
-    image: grafana/grafana-oss:latest
-    environment:
-      GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: admin
-    ports:
-      - "3000:3000"
-    volumes:
-      - grafana-data:/var/lib/grafana
-
-volumes:
-  grafana-data:
-  postgres-data:
-  redpanda-data:
+    <<: *dev

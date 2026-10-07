@@ -113,6 +113,8 @@ class OutboxEventModel(Base):
 
 
 class ReportModel(Base):
+    """Archived schema retained for Alembic; runtime reads use investigations."""
+
     __tablename__ = "reports"
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
     incident_id: Mapped[UUID] = mapped_column(

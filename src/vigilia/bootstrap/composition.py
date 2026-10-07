@@ -11,9 +11,11 @@ from vigilia.application.knowledge import (
     DeleteKnowledgeDocument,
     IncidentKnowledgeRetriever,
     IngestKnowledgeDocument,
+    KnowledgeQueries,
 )
 from vigilia.application.ports import IncidentAnalyzer
 from vigilia.application.use_cases import (
+    AlertQueries,
     CorrelateAlert,
     ExecuteInvestigation,
     IncidentQueries,
@@ -34,11 +36,13 @@ class ProcessResources:
 @dataclass(frozen=True)
 class ApiApplication(ProcessResources):
     ingest_alerts: IngestAlerts
+    alert_queries: AlertQueries
     request_investigation: RequestInvestigation
     incident_queries: IncidentQueries
     investigation_queries: InvestigationQueries
     ingest_knowledge_document: IngestKnowledgeDocument | None
     delete_knowledge_document: DeleteKnowledgeDocument
+    knowledge_queries: KnowledgeQueries
 
 
 @dataclass(frozen=True)
@@ -60,6 +64,7 @@ def compose_api(settings: Settings) -> ApiApplication:
         engine=engine,
         sessions=sessions,
         ingest_alerts=IngestAlerts(unit_of_work, settings.alerts_received_topic),
+        alert_queries=AlertQueries(unit_of_work),
         request_investigation=RequestInvestigation(
             unit_of_work,
             settings.analyzer_version,
@@ -73,6 +78,7 @@ def compose_api(settings: Settings) -> ApiApplication:
             else None
         ),
         delete_knowledge_document=DeleteKnowledgeDocument(unit_of_work),
+        knowledge_queries=KnowledgeQueries(unit_of_work, settings.environment),
     )
 
 

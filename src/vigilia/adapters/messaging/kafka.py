@@ -2,7 +2,7 @@ import asyncio
 import json
 from dataclasses import dataclass, field
 from functools import partial
-from uuid import UUID, NAMESPACE_URL, uuid5
+from uuid import UUID
 
 from confluent_kafka import Consumer, KafkaError, Message, Producer, TopicPartition
 
@@ -34,21 +34,7 @@ def create_producer(bootstrap_servers: str) -> Producer:
 
 def decode_message(message: Message) -> IncomingEvent:
     raw = json.loads(message.value().decode("utf-8"))
-    try:
-        envelope = EventEnvelope.model_validate(raw)
-    except Exception:
-        alert_id = UUID(raw["alert_id"])
-        event_id = uuid5(
-            NAMESPACE_URL,
-            f"vigilia:{message.topic()}:{message.partition()}:{message.offset()}",
-        )
-        envelope = EventEnvelope(
-            event_id=event_id,
-            event_type="alerts.received.v1",
-            aggregate_id=alert_id,
-            correlation_id=alert_id,
-            payload={"alert_id": str(alert_id)},
-        )
+    envelope = EventEnvelope.model_validate(raw)
     return IncomingEvent(
         envelope=envelope,
         topic=message.topic(),

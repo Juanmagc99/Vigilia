@@ -3,14 +3,15 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 from vigilia.application.contracts import (
+    AlertFeedItem,
     AlertIngestionResult,
+    AlertPage,
     AlertRead,
     EventEnvelope,
     IncidentDetail,
     IncidentSummary,
     InvestigationAttemptRead,
     InvestigationRead,
-    LegacyReportRead,
 )
 from vigilia.application.errors import (
     ConflictAppError,
@@ -209,6 +210,31 @@ class IncidentQueries:
             )
 
 
+class AlertQueries:
+    def __init__(self, uow_factory: UnitOfWorkFactory) -> None:
+        self._uow_factory = uow_factory
+
+    async def list(
+        self, *, limit: int, offset: int, service: str | None, status: str | None
+    ) -> AlertPage:
+        async with self._uow_factory() as uow:
+            rows, total = await uow.list_alerts(
+                limit=limit, offset=offset, service=service, status=status
+            )
+        return AlertPage(
+            items=[
+                AlertFeedItem(
+                    **AlertRead.model_validate(alert).model_dump(),
+                    incident_id=incident_id,
+                )
+                for alert, incident_id in rows
+            ],
+            total=total,
+            limit=limit,
+            offset=offset,
+        )
+
+
 class InvestigationQueries:
     def __init__(self, uow_factory: UnitOfWorkFactory) -> None:
         self._uow_factory = uow_factory
@@ -230,15 +256,6 @@ class InvestigationQueries:
                 attempts = await uow.list_attempts(investigation.id)
                 result.append(investigation_read(investigation, attempts))
             return result
-
-    async def list_legacy_reports(self, incident_id: UUID) -> list[LegacyReportRead]:
-        async with self._uow_factory() as uow:
-            if await uow.find_incident(incident_id) is None:
-                raise NotFoundAppError(message="Incident not found")
-            return [
-                LegacyReportRead.model_validate(report)
-                for report in await uow.list_legacy_reports(incident_id)
-            ]
 
 
 class RequestInvestigation:

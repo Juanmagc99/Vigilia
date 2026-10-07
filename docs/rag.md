@@ -188,7 +188,7 @@ Al arrancar el stack de desarrollo, el servicio `migrate` aplica la migración. 
 reconstruir la imagen de la aplicación tras actualizar dependencias:
 
 ```bash
-docker compose -f docker/docker-compose.dev.yaml up --build
+make dev-start
 ```
 
 Para usar una base PostgreSQL externa, su instalación debe permitir la extensión

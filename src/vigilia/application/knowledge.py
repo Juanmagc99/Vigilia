@@ -3,6 +3,7 @@ import math
 import re
 from uuid import UUID
 
+from vigilia.application.contracts import KnowledgeDocumentPage, KnowledgeDocumentRead
 from vigilia.application.errors import NotFoundAppError, ValidationAppError
 from vigilia.application.ports import (
     EmbeddingProvider,
@@ -151,6 +152,37 @@ class DeleteKnowledgeDocument:
                     message="Knowledge document was not found",
                     code="knowledge_document_not_found",
                 )
+
+
+class KnowledgeQueries:
+    def __init__(self, uow_factory: UnitOfWorkFactory, environment: str) -> None:
+        self._uow_factory = uow_factory
+        self._environment = environment
+
+    async def list(self, *, limit: int, offset: int) -> KnowledgeDocumentPage:
+        async with self._uow_factory() as uow:
+            rows, total = await uow.list_knowledge_documents(
+                environment=self._environment, limit=limit, offset=offset
+            )
+        return KnowledgeDocumentPage(
+            items=[
+                KnowledgeDocumentRead.model_validate(
+                    {
+                        "id": document.id,
+                        "service": document.service,
+                        "source": document.source,
+                        "title": document.title,
+                        "version": document.version,
+                        "updated_at": document.updated_at,
+                        "chunk_count": chunk_count,
+                    }
+                )
+                for document, chunk_count in rows
+            ],
+            total=total,
+            limit=limit,
+            offset=offset,
+        )
 
 
 class IncidentKnowledgeRetriever(KnowledgeRetriever):

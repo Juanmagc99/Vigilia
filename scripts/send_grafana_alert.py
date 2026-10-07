@@ -4,11 +4,12 @@ import argparse
 import hashlib
 import hmac
 import json
-import os
 import time
 from datetime import datetime, timezone
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+
+from vigilia.bootstrap.settings import Settings
 
 DEFAULT_WEBHOOK_URL = "http://localhost:8000/webhooks/grafana"
 
@@ -78,7 +79,8 @@ def build_fingerprint(service: str, alert_name: str, instance: str) -> str:
 
 
 def get_configured_hmac_secret() -> str | None:
-    return os.getenv("VIGILIA_GRAFANA_WEBHOOK_HMAC_SECRET")
+    secret = Settings().grafana_webhook_hmac_secret
+    return secret.get_secret_value() if secret else None
 
 
 def build_hmac_signature(

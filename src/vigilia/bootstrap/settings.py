@@ -18,7 +18,6 @@ class Settings(BaseSettings):
 
     kafka_bootstrap_servers: str = "localhost:19092"
     alerts_received_topic: str = "alerts.received.v1"
-    legacy_alerts_received_topic: str = "alerts.received"
     investigations_requested_topic: str = "investigations.requested.v1"
     kafka_flush_timeout_seconds: float = Field(default=5.0, gt=0, le=60)
     outbox_batch_size: int = Field(default=100, ge=1, le=1000)

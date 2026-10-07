@@ -1,7 +1,7 @@
 [project]
 name = "vigilia"
 version = "0.1.0"
-description = "Add your description here"
+description = "Durable operational incident investigations with auditable evidence"
 readme = "README.md"
 requires-python = ">=3.13,<3.14"
 dependencies = [
@@ -10,7 +10,6 @@ dependencies = [
     "fastapi[standard]>=0.137.2",
     "pydantic-settings>=2.12.0",
     "psycopg[binary]>=3.3.4",
-    "pytest>=9.1.1",
     "sqlalchemy[asyncio]>=2.0.48",
     "litellm>=1.100.1",
     "pgvector>=0.4.1",
@@ -21,6 +20,9 @@ vigilia = "vigilia.main:run"
 vigilia-worker = "vigilia.worker:run"
 vigilia-publisher = "vigilia.publisher:run"
 
+[dependency-groups]
+dev = ["pytest>=9.1.1"]
+
 [build-system]
 requires = ["setuptools>=80"]
 build-backend = "setuptools.build_meta"
@@ -28,5 +30,8 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+"vigilia.adapters.http" = ["ui/*"]
+
 [tool.pytest.ini_options]
-pythonpath = ["."]
+testpaths = ["tests"]

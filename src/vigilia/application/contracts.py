@@ -27,6 +27,17 @@ class AlertRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class AlertFeedItem(AlertRead):
+    incident_id: UUID | None = None
+
+
+class AlertPage(BaseModel):
+    items: list[AlertFeedItem]
+    total: int
+    limit: int
+    offset: int
+
+
 class IncidentSummary(BaseModel):
     id: UUID
     revision: int
@@ -82,15 +93,6 @@ class InvestigationRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class LegacyReportRead(BaseModel):
-    id: UUID
-    incident_id: UUID
-    model: str
-    content: dict[str, Any]
-    created_at: datetime
-    model_config = ConfigDict(from_attributes=True)
-
-
 class AlertIngestionResult(BaseModel):
     alerts_received: int
     alerts_normalized: int
@@ -101,6 +103,24 @@ class AlertIngestionResult(BaseModel):
 class KnowledgeDocumentWrite(BaseModel):
     id: UUID
     chunks: int
+
+
+class KnowledgeDocumentRead(BaseModel):
+    id: UUID
+    service: str
+    source: str
+    title: str
+    version: str
+    updated_at: datetime
+    chunk_count: int
+    model_config = ConfigDict(from_attributes=True)
+
+
+class KnowledgeDocumentPage(BaseModel):
+    items: list[KnowledgeDocumentRead]
+    total: int
+    limit: int
+    offset: int
 
 
 class EventEnvelope(BaseModel):

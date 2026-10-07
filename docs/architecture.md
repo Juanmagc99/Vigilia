@@ -185,12 +185,13 @@ mismo conjunto de dependencias:
 
 | Proceso | Recursos y casos de uso |
 | --- | --- |
-| API | Engine, ingesta, solicitud de investigación y consultas |
+| API | Engine, ingesta, solicitud de investigación, consultas, consola y embeddings para indexación RAG |
 | Worker | Engine, correlación y analizador configurado |
 | Publicador | Engine y productor Kafka creado por su entrypoint |
 
 La API conoce la cadena `analyzer_version` para crear una solicitud reproducible,
-pero no construye el analizador ni usa credenciales del modelo. Sólo el worker
+pero no construye el analizador de generación. La API usa credenciales de embeddings
+para indexar documentos cuando RAG está habilitado. Sólo el worker
 construye el adaptador y realiza llamadas al proveedor.
 
 ## 5. Modelo de datos
@@ -204,7 +205,7 @@ construye el adaptador y realiza llamadas al proveedor.
 | `processed_events` | Deduplicación por consumidor y evento |
 | `investigations` | Solicitud, estado, lease, resultado y versión analizada |
 | `investigation_attempts` | Intentos, errores, modelo, tokens, coste y latencia |
-| `reports` | Informes históricos anteriores; lectura compatible |
+| `reports` | Archivo histórico conservado para migraciones; lectura por `investigations` |
 
 La revisión de una incidencia aumenta únicamente cuando se adjunta una alerta nueva.
 Una investigación guarda esa revisión al solicitarse. Aunque la incidencia cambie
@@ -415,7 +416,7 @@ de su transacción.
 
 - El webhook usa HMAC y una ventana temporal para dificultar replay.
 - La API de incidencias usa Bearer token.
-- Sólo el worker entrega credenciales al adaptador y llama al modelo.
+- Sólo el worker llama al modelo de generación; API y worker pueden usar embeddings.
 - No se registran secretos, prompts completos ni respuestas completas.
 - El prompt trata campos externos como datos, mitigando inyección desde alertas.
 - El modelo sólo puede citar IDs enviados y Vigilia reconstruye sus fuentes.

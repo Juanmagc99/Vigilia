@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import asc, delete, desc, or_, select, text
+from sqlalchemy import asc, delete, desc, func, or_, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,7 +15,6 @@ from vigilia.adapters.postgres.models import (
     KnowledgeDocumentModel,
     OutboxEventModel,
     ProcessedEventModel,
-    ReportModel,
 )
 from vigilia.domain.models import NormalizedAlert
 
@@ -63,6 +62,38 @@ async def save_alerts(
 
 async def find_alert(session: AsyncSession, alert_id: UUID) -> AlertModel | None:
     return await session.get(AlertModel, alert_id)
+
+
+async def list_alerts(
+    session: AsyncSession,
+    *,
+    limit: int,
+    offset: int,
+    service: str | None,
+    status: str | None,
+) -> tuple[list[tuple[AlertModel, UUID | None]], int]:
+    filters = []
+    if service:
+        filters.append(AlertModel.service == service)
+    if status:
+        filters.append(AlertModel.status == status)
+    incident_id = (
+        select(IncidentAlertModel.incident_id)
+        .where(IncidentAlertModel.alert_id == AlertModel.id)
+        .limit(1)
+        .correlate(AlertModel)
+        .scalar_subquery()
+    )
+    statement = (
+        select(AlertModel, incident_id)
+        .where(*filters)
+        .order_by(desc(AlertModel.received_at), desc(AlertModel.id))
+        .limit(limit)
+        .offset(offset)
+    )
+    rows = (await session.execute(statement)).all()
+    total = await session.scalar(select(func.count(AlertModel.id)).where(*filters))
+    return [(alert, linked_incident_id) for alert, linked_incident_id in rows], total or 0
 
 
 async def lock_correlation_service(session: AsyncSession, service: str) -> None:
@@ -233,17 +264,6 @@ async def list_attempts(
     return list((await session.scalars(statement)).all())
 
 
-async def list_legacy_reports(
-    session: AsyncSession, incident_id: UUID
-) -> list[ReportModel]:
-    statement = (
-        select(ReportModel)
-        .where(ReportModel.incident_id == incident_id)
-        .order_by(desc(ReportModel.created_at))
-    )
-    return list((await session.scalars(statement)).all())
-
-
 async def upsert_knowledge_document(
     session: AsyncSession,
     *,
@@ -309,6 +329,31 @@ async def delete_knowledge_document(session: AsyncSession, document_id: UUID) ->
         return False
     await session.delete(document)
     return True
+
+
+async def list_knowledge_documents(
+    session: AsyncSession, *, environment: str, limit: int, offset: int
+) -> tuple[list[tuple[KnowledgeDocumentModel, int]], int]:
+    chunk_count = (
+        select(func.count(KnowledgeChunkModel.id))
+        .where(KnowledgeChunkModel.document_id == KnowledgeDocumentModel.id)
+        .correlate(KnowledgeDocumentModel)
+        .scalar_subquery()
+    )
+    statement = (
+        select(KnowledgeDocumentModel, chunk_count)
+        .where(KnowledgeDocumentModel.environment == environment)
+        .order_by(desc(KnowledgeDocumentModel.updated_at), desc(KnowledgeDocumentModel.id))
+        .limit(limit)
+        .offset(offset)
+    )
+    rows = (await session.execute(statement)).all()
+    total = await session.scalar(
+        select(func.count(KnowledgeDocumentModel.id)).where(
+            KnowledgeDocumentModel.environment == environment
+        )
+    )
+    return [(document, count) for document, count in rows], total or 0
 
 
 async def search_knowledge_chunks(
