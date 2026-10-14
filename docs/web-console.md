@@ -27,4 +27,4 @@ La API requiere RAG para indexar documentos; el listado funciona también con RA
 - La API no expone el texto completo de los documentos almacenados.
 - Falta ampliar las pruebas de interfaz, accesibilidad y estados de error.
 
-El flujo de validación reproducible está en [README](../README.md) y las prioridades pendientes en [el roadmap](../VIGILIA_ROADMAP.md).
+El flujo de validación reproducible está en [README](../README.md).

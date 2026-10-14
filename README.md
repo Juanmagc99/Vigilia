@@ -44,12 +44,10 @@ uv run --locked python scripts/send_grafana_alert.py --service payments-api --st
 
 La configuración vive en `.env`; empieza por [.env.example](.env.example). La generación real y la indexación RAG pueden consumir cuota del proveedor. Configúralas solo cuando quieras probarlas.
 
-- [Flujo actual del producto](VIGILIA_FLOW.md)
 - [Arquitectura](docs/architecture.md) y [decisiones](docs/decisions/)
 - [RAG: documentos, embeddings y recuperación](docs/rag.md)
 - [Límites y respuestas 429/503](docs/rate-limits.md)
 - [Consola web](docs/web-console.md)
-- [Roadmap](VIGILIA_ROADMAP.md)
 - [Validación y límites conocidos](docs/validation.md)
 
 El entorno Compose es para desarrollo local; el despliegue productivo está pendiente.

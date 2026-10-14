@@ -21,3 +21,7 @@ vigilia-ws.code-workspace
 *.log.*
 logs/
 log/
+
+# Local planning notes
+/VIGILIA_FLOW.md
+/VIGILIA_ROADMAP.md
