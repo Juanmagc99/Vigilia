@@ -44,7 +44,10 @@ export async function request(path, { method = "GET", body, headers = {}, signal
       clearToken();
       authFailureHandler("The API token was rejected. Please enter it again.");
     }
-    throw new ApiError(response.status, error.code || "request_failed", error.message || "The request failed.", error.metadata || {});
+    const retryAfter = Number(response.headers.get("Retry-After"));
+    const retryHint = Number.isFinite(retryAfter) && retryAfter > 0
+      ? ` Try again in ${retryAfter} seconds.` : "";
+    throw new ApiError(response.status, error.code || "request_failed", (error.message || "The request failed.") + retryHint, error.metadata || {});
   }
   return payload;
 }

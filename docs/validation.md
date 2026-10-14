@@ -1,5 +1,16 @@
 # Validación del mantenimiento
 
+## Límites de solicitudes y concurrencia: 14 de octubre de 2026
+
+- Suite con Redis y PostgreSQL locales: **17 comprobaciones pasan**, incluidas cuota atómica entre clientes, expiración, autenticación, rutas costosas, HMAC, Redis no disponible, recuperación de plazas, timeout de proveedor y admisión concurrente de investigaciones con idempotencia/outbox. La comprobación PostgreSQL utiliza un esquema temporal aislado.
+- API real en un contenedor temporal con cuota de 2/min y espacio Redis propio: lectura sin credenciales `401`, dos lecturas autenticadas `200` y siguiente lectura `429` con `Retry-After` y cabeceras de cuota. `/health` y `/ready` siguen respondiendo `200`. El contenedor se retiró y la cuota de la API habitual se conservó.
+- Compose validado; imagen reconstruida y API, worker, publicador, PostgreSQL, Redpanda y Redis arrancados. Revisión estática de los módulos modificados sin errores.
+- Las comprobaciones no llamaron a proveedores reales: generación se sustituyó y la comprobación HTTP temporal usó lecturas con RAG apagado. El stack habitual conserva su configuración RAG.
+
+La advertencia existente de Starlette/httpx continúa. Estas comprobaciones no prueban presupuestos de dinero, cuotas de tokens/RPM del proveedor ni calidad RAG. Configuración y alcance en [rate-limits.md](rate-limits.md).
+
+## Mantenimiento anterior
+
 Validación local del 7 de octubre de 2026. Docker mantuvo pip y requirements.txt. Las comprobaciones no llamaron a proveedores de generación ni embeddings.
 
 ## Comprobaciones completadas

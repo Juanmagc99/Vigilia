@@ -17,6 +17,7 @@ from vigilia.application.errors import (
     ConflictAppError,
     NotFoundAppError,
     PermanentInvestigationError,
+    RateLimitAppError,
     TransientInvestigationError,
 )
 from vigilia.application.ports import (
@@ -264,15 +265,19 @@ class RequestInvestigation:
         uow_factory: UnitOfWorkFactory,
         analyzer_version: str,
         requested_topic: str,
+        max_active_investigations: int = 0,
     ) -> None:
         self._uow_factory = uow_factory
         self._analyzer_version = analyzer_version
         self._requested_topic = requested_topic
+        self._max_active_investigations = max_active_investigations
 
     async def execute(
         self, incident_id: UUID, idempotency_key: str | None
     ) -> InvestigationRead:
         async with self._uow_factory() as uow:
+            if self._max_active_investigations:
+                await uow.lock_investigation_capacity()
             incident = await uow.find_incident(incident_id, lock=True)
             if incident is None:
                 raise NotFoundAppError(message="Incident not found")
@@ -291,6 +296,15 @@ class RequestInvestigation:
                     code="investigation_already_active",
                     metadata={"investigation_id": str(active.id)},
                 )
+            if self._max_active_investigations:
+                active_count = await uow.count_active_investigations()
+                if active_count >= self._max_active_investigations:
+                    raise RateLimitAppError(
+                        message="The active investigation limit has been reached",
+                        code="investigation_capacity_exceeded",
+                        metadata={"limit": self._max_active_investigations},
+                        retry_after_seconds=5,
+                    )
             now = utcnow()
             investigation = await uow.create_investigation(
                 id=uuid4(),
@@ -391,6 +405,7 @@ class ExecuteInvestigation:
                 exc.message,
                 causation_id,
                 retryable=True,
+                retry_after_seconds=exc.retry_after_seconds,
             )
             return True
         except PermanentInvestigationError as exc:
@@ -561,6 +576,7 @@ class ExecuteInvestigation:
         causation_id: UUID | None,
         *,
         retryable: bool,
+        retry_after_seconds: int | None = None,
     ) -> None:
         async with self._uow_factory() as uow:
             investigation = await uow.find_investigation(investigation_id, lock=True)
@@ -587,6 +603,7 @@ class ExecuteInvestigation:
                     2**investigation.attempt_count,
                     self._max_retry_delay_seconds,
                 )
+                delay = max(delay, retry_after_seconds or 0)
                 investigation.status = "retry_wait"
                 investigation.next_attempt_at = now + timedelta(seconds=delay)
                 await queue_event(

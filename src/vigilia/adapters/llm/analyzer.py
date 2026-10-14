@@ -1,3 +1,5 @@
+import asyncio
+from contextlib import nullcontext
 from decimal import Decimal, InvalidOperation
 from time import perf_counter
 from typing import Any
@@ -11,6 +13,7 @@ from vigilia.application.errors import (
     PermanentInvestigationError,
     TransientInvestigationError,
 )
+from vigilia.application.ports import ProviderCallLimiter
 from vigilia.domain.models import (
     AnalysisOutput,
     AnalysisResult,
@@ -19,6 +22,7 @@ from vigilia.domain.models import (
 )
 
 TRANSIENT_PROVIDER_ERRORS = (
+    TimeoutError,
     litellm.Timeout,
     litellm.RateLimitError,
     litellm.APIConnectionError,
@@ -49,6 +53,7 @@ class LiteLLMIncidentAnalyzer:
         timeout_seconds: float,
         max_output_tokens: int,
         max_alerts: int,
+        call_limiter: ProviderCallLimiter | None = None,
     ) -> None:
         self._model = model
         self._api_key = api_key
@@ -56,7 +61,8 @@ class LiteLLMIncidentAnalyzer:
         self._timeout_seconds = timeout_seconds
         self._max_output_tokens = max_output_tokens
         self._max_alerts = max_alerts
-        self.version = f"litellm:{model}:investigation-v1"
+        self._call_limiter = call_limiter
+        self.version = f"litellm:{model}:investigation-v2"
         self.provider = "litellm"
         self.model = model
 
@@ -83,7 +89,11 @@ class LiteLLMIncidentAnalyzer:
             request["api_base"] = self._api_base
 
         try:
-            response = await litellm.acompletion(**request)
+            async with (
+                self._call_limiter.slot() if self._call_limiter else nullcontext()
+            ):
+                async with asyncio.timeout(self._timeout_seconds):
+                    response = await litellm.acompletion(**request)
         except PERMANENT_PROVIDER_ERRORS as exc:
             raise PermanentInvestigationError(
                 message="The configured model rejected the investigation request",

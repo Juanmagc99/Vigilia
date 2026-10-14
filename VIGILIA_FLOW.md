@@ -30,6 +30,8 @@ Los almacenes son tablas de la misma base PostgreSQL. Hay tres procesos de aplic
 
 ## 1. Ingesta y publicación
 
+Las peticiones protegidas y los webhooks tienen cuotas HTTP compartidas en Redis. Las investigaciones tienen además un cupo durable en PostgreSQL, y generación/embeddings usan plazas compartidas entre procesos. Los rechazos devuelven `429` o `503` con `Retry-After`, según el control afectado. [La guía de límites](docs/rate-limits.md) detalla valores y comportamiento.
+
 1. Grafana envía `POST /webhooks/grafana` con firma HMAC-SHA256 y timestamp. Se verifican la firma y la ventana temporal antes de aceptar el cuerpo.
 2. `adapters/grafana` valida y transforma el payload en `NormalizedAlert`. El servicio procede de `labels.service`, de `labels.instance` o de `unknown`.
 3. `IngestAlerts` guarda alertas nuevas y eventos outbox en la misma transacción. La clave natural de deduplicación usa origen, fingerprint, inicio y estado.

@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from contextlib import AbstractAsyncContextManager
 from datetime import datetime
 from types import TracebackType
 from typing import Any, Protocol, Self
@@ -137,6 +138,8 @@ class UnitOfWork(Protocol):
         available_at: datetime,
     ) -> None: ...
     async def create_investigation(self, **values: Any) -> InvestigationEntity: ...
+    async def lock_investigation_capacity(self) -> None: ...
+    async def count_active_investigations(self) -> int: ...
     async def find_investigation(
         self, investigation_id: UUID, *, lock: bool = False
     ) -> InvestigationEntity | None: ...
@@ -196,6 +199,10 @@ class EmbeddingProvider(Protocol):
     model: str
 
     async def embed(self, texts: list[str]) -> list[tuple[float, ...]]: ...
+
+
+class ProviderCallLimiter(Protocol):
+    def slot(self) -> AbstractAsyncContextManager[None]: ...
 
 
 class KnowledgeRetriever(Protocol):

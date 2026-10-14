@@ -1,9 +1,10 @@
 # Roadmap de Vigilia
 
-Estado revisado el **7 de octubre de 2026**, después de la migración a `src/vigilia`. Este es el único roadmap vigente. [README](README.md) explica la operación local; [VIGILIA_FLOW](VIGILIA_FLOW.md) describe el comportamiento implementado.
+Estado actualizado el **14 de octubre de 2026** con los límites de solicitudes y concurrencia, sobre la migración a `src/vigilia` del 7 de octubre. Este es el único roadmap vigente. [README](README.md) explica la operación local; [VIGILIA_FLOW](VIGILIA_FLOW.md) describe el comportamiento implementado.
 
 ## Implementado
 
+- [x] 14 de octubre de 2026: cuotas HTTP compartidas en Redis, `429`/`Retry-After`, control de investigaciones activas y plazas compartidas de generación/embeddings. Configuración y límites de alcance en [docs/rate-limits.md](docs/rate-limits.md).
 - [x] Arquitectura con dominio, aplicación, adaptadores y bootstrap; persistencia async con SQLAlchemy/psycopg.
 - [x] Tres procesos independientes: API, publicador outbox y worker.
 - [x] Ingesta Grafana autenticada con HMAC, normalización y deduplicación persistente.
@@ -32,7 +33,7 @@ Estas tareas tienen prioridad antes de aumentar el uso de proveedores o workers.
 
 - [ ] **Fijar las evidencias a la revisión solicitada.** Hoy se registra `incident_revision` al solicitar, pero el snapshot carga las alertas existentes al reclamar el trabajo. Si llegan alertas mientras está en cola, el contexto puede pertenecer a una revisión posterior. Persistir el snapshot al solicitar o reconstruir la revisión exacta y verificar el caso concurrente.
 - [ ] Presupuesto global por periodo y reserva previa de coste, incluyendo generación, embeddings y reintentos.
-- [ ] Limitar llamadas simultáneas y solicitudes por cliente; el worker actual procesa mensajes secuencialmente por instancia, pero varias réplicas pueden consumir a la vez.
+- [x] Limitar llamadas simultáneas y solicitudes del Bearer compartido entre réplicas. Cuotas por usuario y cuotas de tokens/RPM de proveedores siguen pendientes.
 - [ ] Catálogo de modelos aprobados por entorno, límites de contexto y contabilización de llamadas fallidas.
 - [ ] Validar generación estructurada y embeddings contra un proveedor real con gasto acotado (presupuesto de desarrollo acordado: 4–5 €).
 
@@ -71,7 +72,9 @@ Estas tareas tienen prioridad antes de aumentar el uso de proveedores o workers.
 
 ## Cobertura y validación pendiente
 
-La suite actual cubre salud, autenticación, webhook/normalización y publicación de un lote outbox: **8 tests existentes**. No equivale a cobertura completa de la arquitectura. El script `make smoke` comprueba contra Docker el flujo de alerta duplicada, correlación, investigación idempotente, consulta y resolución, con simulador y RAG apagado.
+La implementación de límites del 14 de octubre incorpora nueve comprobaciones adicionales con Redis/PostgreSQL, activadas mediante las variables indicadas en [docs/rate-limits.md](docs/rate-limits.md). Cubren las cuotas y el cupo concurrente; las ampliaciones de dominio, RAG y recuperación general siguen pendientes.
+
+La suite base sin infraestructura cubre salud, autenticación, webhook/normalización y publicación de un lote outbox: **8 tests**. Con las nueve comprobaciones de límites habilitadas, el total es **17**. No equivale a cobertura completa de la arquitectura. El script `make smoke` comprueba contra Docker el flujo de alerta duplicada, correlación, investigación idempotente, consulta y resolución, con simulador y RAG apagado.
 
 - [ ] Tests de reglas de dominio: ventana, severidad, resolución y correlación concurrente.
 - [ ] Tests de investigaciones: revisión, unicidad, leases, fencing, reintentos y fallos permanentes.

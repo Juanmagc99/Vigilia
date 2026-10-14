@@ -16,11 +16,28 @@ from vigilia.adapters.postgres.models import (
     OutboxEventModel,
     ProcessedEventModel,
 )
-from vigilia.domain.models import NormalizedAlert
+from vigilia.domain.models import ACTIVE_INVESTIGATION_STATUSES, NormalizedAlert
 
 
 def utcnow() -> datetime:
     return datetime.now(UTC)
+
+
+async def lock_investigation_capacity(session: AsyncSession) -> None:
+    await session.execute(
+        text("SELECT pg_advisory_xact_lock(hashtext('vigilia.investigation.capacity'))")
+    )
+
+
+async def count_active_investigations(session: AsyncSession) -> int:
+    return (
+        await session.scalar(
+            select(func.count(InvestigationModel.id)).where(
+                InvestigationModel.status.in_(ACTIVE_INVESTIGATION_STATUSES)
+            )
+        )
+        or 0
+    )
 
 
 async def save_alerts(
@@ -93,7 +110,9 @@ async def list_alerts(
     )
     rows = (await session.execute(statement)).all()
     total = await session.scalar(select(func.count(AlertModel.id)).where(*filters))
-    return [(alert, linked_incident_id) for alert, linked_incident_id in rows], total or 0
+    return [
+        (alert, linked_incident_id) for alert, linked_incident_id in rows
+    ], total or 0
 
 
 async def lock_correlation_service(session: AsyncSession, service: str) -> None:
@@ -343,7 +362,9 @@ async def list_knowledge_documents(
     statement = (
         select(KnowledgeDocumentModel, chunk_count)
         .where(KnowledgeDocumentModel.environment == environment)
-        .order_by(desc(KnowledgeDocumentModel.updated_at), desc(KnowledgeDocumentModel.id))
+        .order_by(
+            desc(KnowledgeDocumentModel.updated_at), desc(KnowledgeDocumentModel.id)
+        )
         .limit(limit)
         .offset(offset)
     )

@@ -55,6 +55,18 @@ class Settings(BaseSettings):
     grafana_webhook_max_age_seconds: int = Field(default=300, gt=0, le=3600)
     api_token: SecretStr | None = None
 
+    redis_url: SecretStr = SecretStr("redis://127.0.0.1:6379/0")
+    rate_limit_enabled: bool = True
+    rate_limit_ingress_per_minute: int = Field(default=120, ge=1)
+    rate_limit_api_per_minute: int = Field(default=60, ge=1)
+    rate_limit_investigations_per_minute: int = Field(default=5, ge=1)
+    rate_limit_knowledge_per_minute: int = Field(default=2, ge=1)
+    rate_limit_webhooks_per_minute: int = Field(default=120, ge=1)
+    max_active_investigations: int = Field(default=2, ge=0)
+    provider_call_limits_enabled: bool = True
+    llm_max_concurrent_calls: int = Field(default=2, ge=1)
+    rag_embedding_max_concurrent_calls: int = Field(default=2, ge=1)
+
     model_config = SettingsConfigDict(
         env_prefix="VIGILIA_",
         env_file=".env",
@@ -89,7 +101,7 @@ class Settings(BaseSettings):
         if self.investigation_analyzer == "simulated":
             base_version = "simulated-v1"
         else:
-            base_version = f"litellm:{self.llm_model}:investigation-v1"
+            base_version = f"litellm:{self.llm_model}:investigation-v2"
         if self.rag_enabled:
             return f"{base_version}:rag:{self.rag_embedding_model}:v1"
         return base_version

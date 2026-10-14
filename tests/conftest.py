@@ -17,7 +17,6 @@ from vigilia.adapters.http.routes import router
 from vigilia.application.contracts import AlertIngestionResult
 from vigilia.bootstrap.settings import Settings
 
-
 TEST_GRAFANA_SECRET = "test-grafana-hmac-secret"
 TEST_API_TOKEN = "test-api-token"
 FIXED_NOW = 1_750_000_000
@@ -51,6 +50,7 @@ def application() -> SimpleNamespace:
             _env_file=None,
             api_token=None,
             grafana_webhook_hmac_secret=None,
+            rate_limit_enabled=False,
         ),
         ingest_alerts=FakeIngestAlerts(),
         incident_queries=FakeIncidentQueries(),
@@ -96,9 +96,7 @@ def signed_grafana_request() -> Callable:
     def build_request(
         payload: dict, *, timestamp: str | None = None
     ) -> tuple[bytes, dict[str, str]]:
-        body = json.dumps(
-            payload, separators=(",", ":"), ensure_ascii=False
-        ).encode()
+        body = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode()
         request_timestamp = timestamp or str(FIXED_NOW)
         signed_payload = request_timestamp.encode() + b":" + body
         signature = hmac.new(

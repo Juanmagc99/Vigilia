@@ -5,7 +5,6 @@ from fastapi.responses import JSONResponse
 from vigilia.application.errors import AppError
 from vigilia.observability.logging import get_logger
 
-
 logger = get_logger(__name__)
 
 
@@ -24,6 +23,10 @@ async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
     )
     return JSONResponse(
         status_code=exc.status_code,
+        headers={
+            **getattr(request.state, "rate_limit_headers", {}),
+            **exc.headers,
+        },
         content={
             "error": {
                 "type": exc.error_type,
@@ -40,6 +43,7 @@ async def validation_error_handler(
 ) -> JSONResponse:
     return JSONResponse(
         status_code=422,
+        headers=getattr(request.state, "rate_limit_headers", {}),
         content={
             "error": {
                 "type": "validation_error",

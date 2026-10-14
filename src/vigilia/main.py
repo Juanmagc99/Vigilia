@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 
 from vigilia import __version__
 from vigilia.adapters.http.errors import register_exception_handlers
+from vigilia.adapters.http.rate_limits import RateLimitMiddleware
 from vigilia.adapters.http.routes import router
 from vigilia.bootstrap.resources import api_resources
 from vigilia.bootstrap.settings import Settings
@@ -30,6 +31,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         lifespan=lifespan,
     )
     register_exception_handlers(app)
+    app.add_middleware(RateLimitMiddleware)
     app.include_router(router)
     app.mount(
         "/ui",

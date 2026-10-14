@@ -117,6 +117,12 @@ class SqlAlchemyUnitOfWork:
         await self.session.flush()
         return investigation
 
+    async def lock_investigation_capacity(self):
+        await repositories.lock_investigation_capacity(self.session)
+
+    async def count_active_investigations(self):
+        return await repositories.count_active_investigations(self.session)
+
     async def find_investigation(self, investigation_id, *, lock=False):
         return await repositories.find_investigation(
             self.session, investigation_id, lock=lock

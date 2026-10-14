@@ -6,6 +6,7 @@ from vigilia.adapters.llm.analyzer import LiteLLMIncidentAnalyzer
 from vigilia.adapters.llm.embeddings import LiteLLMEmbeddingProvider
 from vigilia.adapters.postgres.session import create_engine, create_session_factory
 from vigilia.adapters.postgres.unit_of_work import create_unit_of_work_factory
+from vigilia.adapters.redis.controls import RedisTrafficControls
 from vigilia.adapters.simulation.analyzer import SimulatedIncidentAnalyzer
 from vigilia.application.knowledge import (
     DeleteKnowledgeDocument,
@@ -31,6 +32,7 @@ class ProcessResources:
     settings: Settings
     engine: AsyncEngine
     sessions: async_sessionmaker[AsyncSession]
+    traffic_controls: RedisTrafficControls | None
 
 
 @dataclass(frozen=True)
@@ -59,21 +61,24 @@ def _database_resources(settings: Settings):
 
 def compose_api(settings: Settings) -> ApiApplication:
     engine, sessions, unit_of_work = _database_resources(settings)
+    controls = _compose_traffic_controls(settings)
     return ApiApplication(
         settings=settings,
         engine=engine,
         sessions=sessions,
+        traffic_controls=controls,
         ingest_alerts=IngestAlerts(unit_of_work, settings.alerts_received_topic),
         alert_queries=AlertQueries(unit_of_work),
         request_investigation=RequestInvestigation(
             unit_of_work,
             settings.analyzer_version,
             settings.investigations_requested_topic,
+            settings.max_active_investigations,
         ),
         incident_queries=IncidentQueries(unit_of_work),
         investigation_queries=InvestigationQueries(unit_of_work),
         ingest_knowledge_document=(
-            _compose_knowledge_ingestion(settings, unit_of_work)
+            _compose_knowledge_ingestion(settings, unit_of_work, controls)
             if settings.rag_enabled
             else None
         ),
@@ -84,9 +89,10 @@ def compose_api(settings: Settings) -> ApiApplication:
 
 def compose_worker(settings: Settings) -> WorkerApplication:
     engine, sessions, unit_of_work = _database_resources(settings)
-    analyzer = _compose_analyzer(settings)
+    controls = _compose_traffic_controls(settings)
+    analyzer = _compose_analyzer(settings, controls)
     knowledge_retriever = (
-        _compose_knowledge_retriever(settings, unit_of_work)
+        _compose_knowledge_retriever(settings, unit_of_work, controls)
         if settings.rag_enabled
         else None
     )
@@ -94,6 +100,7 @@ def compose_worker(settings: Settings) -> WorkerApplication:
         settings=settings,
         engine=engine,
         sessions=sessions,
+        traffic_controls=controls,
         correlate_alert=CorrelateAlert(
             unit_of_work, settings.incident_correlation_window_minutes
         ),
@@ -109,7 +116,17 @@ def compose_worker(settings: Settings) -> WorkerApplication:
     )
 
 
-def _compose_analyzer(settings: Settings) -> IncidentAnalyzer:
+def _compose_traffic_controls(settings: Settings) -> RedisTrafficControls | None:
+    if not settings.rate_limit_enabled and not settings.provider_call_limits_enabled:
+        return None
+    return RedisTrafficControls(
+        settings.redis_url.get_secret_value(), settings.environment
+    )
+
+
+def _compose_analyzer(
+    settings: Settings, controls: RedisTrafficControls | None
+) -> IncidentAnalyzer:
     if settings.investigation_analyzer == "simulated":
         return SimulatedIncidentAnalyzer()
     return LiteLLMIncidentAnalyzer(
@@ -121,23 +138,43 @@ def _compose_analyzer(settings: Settings) -> IncidentAnalyzer:
         timeout_seconds=settings.llm_timeout_seconds,
         max_output_tokens=settings.llm_max_output_tokens,
         max_alerts=settings.llm_max_alerts,
+        call_limiter=(
+            controls.call_limiter(
+                "generation",
+                settings.llm_max_concurrent_calls,
+                settings.llm_timeout_seconds,
+            )
+            if controls and settings.provider_call_limits_enabled
+            else None
+        ),
     )
 
 
-def _compose_embedding_provider(settings: Settings) -> LiteLLMEmbeddingProvider:
+def _compose_embedding_provider(
+    settings: Settings, controls: RedisTrafficControls | None
+) -> LiteLLMEmbeddingProvider:
     api_key = settings.rag_embedding_api_key or settings.llm_api_key
     return LiteLLMEmbeddingProvider(
         model=settings.rag_embedding_model or "",
         api_key=api_key.get_secret_value() if api_key else None,
         api_base=settings.rag_embedding_api_base,
         timeout_seconds=settings.rag_embedding_timeout_seconds,
+        call_limiter=(
+            controls.call_limiter(
+                "embeddings",
+                settings.rag_embedding_max_concurrent_calls,
+                settings.rag_embedding_timeout_seconds,
+            )
+            if controls and settings.provider_call_limits_enabled
+            else None
+        ),
     )
 
 
-def _compose_knowledge_ingestion(settings: Settings, unit_of_work):
+def _compose_knowledge_ingestion(settings: Settings, unit_of_work, controls):
     return IngestKnowledgeDocument(
         unit_of_work,
-        _compose_embedding_provider(settings),
+        _compose_embedding_provider(settings, controls),
         environment=settings.environment,
         chunk_size=settings.rag_chunk_size,
         chunk_overlap=settings.rag_chunk_overlap,
@@ -146,10 +183,10 @@ def _compose_knowledge_ingestion(settings: Settings, unit_of_work):
     )
 
 
-def _compose_knowledge_retriever(settings: Settings, unit_of_work):
+def _compose_knowledge_retriever(settings: Settings, unit_of_work, controls):
     return IncidentKnowledgeRetriever(
         unit_of_work,
-        _compose_embedding_provider(settings),
+        _compose_embedding_provider(settings, controls),
         environment=settings.environment,
         top_k=settings.rag_top_k,
         max_context_characters=settings.rag_max_context_characters,
@@ -158,4 +195,6 @@ def _compose_knowledge_retriever(settings: Settings, unit_of_work):
 
 def compose_publisher(settings: Settings) -> ProcessResources:
     engine, sessions, _ = _database_resources(settings)
-    return ProcessResources(settings=settings, engine=engine, sessions=sessions)
+    return ProcessResources(
+        settings=settings, engine=engine, sessions=sessions, traffic_controls=None
+    )

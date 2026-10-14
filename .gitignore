@@ -15,3 +15,9 @@ vigilia-ws.code-workspace
 .agents
 
 .ruff_cache
+
+# Local runtime logs
+*.log
+*.log.*
+logs/
+log/

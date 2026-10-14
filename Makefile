@@ -4,17 +4,17 @@ APP_SERVICES := api worker outbox-publisher
 .PHONY: help dev-start dev-restart dev-rebuild dev-stop dev-status dev-logs dev-migrate test smoke seed-knowledge
 
 help:
-	@echo "Targets disponibles:"
-	@echo "  make dev-start      Construye y levanta el entorno local"
-	@echo "  make dev-restart    Reinicia API, worker y publicador"
-	@echo "  make dev-rebuild    Reconstruye y recrea los procesos de aplicacion"
-	@echo "  make dev-stop       Para contenedores y conserva los datos"
-	@echo "  make dev-status     Muestra el estado de los servicios"
-	@echo "  make dev-logs       Sigue los logs"
-	@echo "  make dev-migrate    Aplica las migraciones pendientes"
-	@echo "  make test           Ejecuta los tests locales con uv"
-	@echo "  make smoke          Comprueba el flujo real con el simulador y RAG apagado"
-	@echo "  make seed-knowledge Indexa runbooks (requiere RAG; consume embeddings)"
+	@echo "Available targets:"
+	@echo "  make dev-start      Build and start the local environment"
+	@echo "  make dev-restart    Restart the API, worker, and publisher"
+	@echo "  make dev-rebuild    Rebuild and recreate application processes"
+	@echo "  make dev-stop       Stop containers and retain data"
+	@echo "  make dev-status     Show service status"
+	@echo "  make dev-logs       Follow service logs"
+	@echo "  make dev-migrate    Apply pending migrations"
+	@echo "  make test           Run local tests with uv"
+	@echo "  make smoke          Check the real flow with simulation and RAG disabled"
+	@echo "  make seed-knowledge Index runbooks (requires RAG; uses embeddings)"
 
 dev-start:
 	$(COMPOSE) up --build -d --wait --wait-timeout 60

@@ -13,6 +13,7 @@ x-vigilia-worker: &vigilia-worker
     VIGILIA_DB_USER: vigilia
     VIGILIA_DB_PASSWORD: vigilia
     VIGILIA_KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+    VIGILIA_REDIS_URL: redis://redis:6379/0
   depends_on:
     postgres:
       condition: service_healthy
@@ -21,6 +22,20 @@ x-vigilia-worker: &vigilia-worker
   restart: unless-stopped
 
 services:
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
   postgres:
     image: pgvector/pgvector:pg17
     environment:
@@ -95,6 +110,8 @@ services:
       start_period: 10s
       retries: 5
     depends_on:
+      redis:
+        condition: service_healthy
       postgres:
         condition: service_healthy
       redpanda:
@@ -106,6 +123,8 @@ services:
     <<: *vigilia-worker
     command: ["python", "-m", "vigilia.worker"]
     depends_on:
+      redis:
+        condition: service_healthy
       postgres:
         condition: service_healthy
       redpanda:
@@ -149,6 +168,7 @@ services:
       - grafana-data:/var/lib/grafana
 
 volumes:
+  redis-data:
   grafana-data:
   postgres-data:
   redpanda-data:

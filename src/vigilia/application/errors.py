@@ -13,11 +13,36 @@ class AppError(Exception):
         message: str | None = None,
         code: str | None = None,
         metadata: dict[str, Any] | None = None,
+        retry_after_seconds: int | None = None,
     ) -> None:
         self.message = message or self.default_message
         self.code = code or self.default_code
         self.metadata = metadata or {}
+        self.retry_after_seconds = retry_after_seconds
         super().__init__(self.message)
+
+    @property
+    def headers(self) -> dict[str, str]:
+        if self.retry_after_seconds is None:
+            return {}
+        return {"Retry-After": str(self.retry_after_seconds)}
+
+
+class RateLimitAppError(AppError):
+    status_code = 429
+    error_type = "rate_limit_error"
+    default_code = "rate_limit_exceeded"
+    default_message = "Too many requests. Please try again later."
+
+
+class RateLimitBackendUnavailableAppError(AppError):
+    status_code = 503
+    error_type = "service_unavailable"
+    default_code = "rate_limit_backend_unavailable"
+    default_message = "Request limits are temporarily unavailable"
+
+    def __init__(self) -> None:
+        super().__init__(retry_after_seconds=5)
 
 
 class DatabaseAppError(AppError):

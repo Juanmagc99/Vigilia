@@ -8,6 +8,10 @@ from sqlalchemy import text
 from vigilia.adapters.grafana.normalizer import normalize_grafana_payload
 from vigilia.adapters.grafana.schemas import GrafanaWebhookPayload
 from vigilia.adapters.http.dependencies import ApplicationDependency
+from vigilia.adapters.http.rate_limits import (
+    enforce_api_rate_limit,
+    enforce_webhook_rate_limit,
+)
 from vigilia.adapters.http.security import verify_api_token, verify_grafana_signature
 from vigilia.application.contracts import (
     AlertPage,
@@ -35,6 +39,8 @@ async def health(application: ApplicationDependency) -> dict[str, str]:
 async def ready(application: ApplicationDependency) -> dict[str, str]:
     async with application.sessions() as session:
         await session.execute(text("SELECT 1"))
+    if application.traffic_controls:
+        await application.traffic_controls.ready()
     return {"status": "ready"}
 
 
@@ -42,7 +48,10 @@ async def ready(application: ApplicationDependency) -> dict[str, str]:
     "/webhooks/grafana",
     status_code=status.HTTP_202_ACCEPTED,
     tags=["grafana"],
-    dependencies=[Depends(verify_grafana_signature)],
+    dependencies=[
+        Depends(verify_grafana_signature),
+        Depends(enforce_webhook_rate_limit),
+    ],
 )
 async def receive_grafana_webhook(
     payload: GrafanaWebhookPayload, application: ApplicationDependency
@@ -57,7 +66,9 @@ async def receive_grafana_webhook(
     }
 
 
-protected = APIRouter(dependencies=[Depends(verify_api_token)])
+protected = APIRouter(
+    dependencies=[Depends(verify_api_token), Depends(enforce_api_rate_limit)]
+)
 
 
 class KnowledgeDocumentRequest(BaseModel):
